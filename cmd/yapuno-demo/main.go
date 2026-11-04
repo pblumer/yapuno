@@ -3,14 +3,14 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"html/template"
 	"log"
 	"net"
 	"net/http"
-	"html/template"
-	"crypto/rand"
-	"encoding/hex"
 	"strings"
 	"sync"
 	"time"
@@ -20,9 +20,9 @@ import (
 )
 
 type demoState struct {
-	mu sync.Mutex
+	mu       sync.Mutex
 	children []familydashboard.Child
-	token string
+	token    string
 }
 
 func newDemoState() *demoState {
@@ -99,8 +99,8 @@ func (s *demoState) view(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = t.Execute(w, struct {
-		Token string
-		Skin string
+		Token     string
+		Skin      string
 		Dashboard template.HTML
 	}{token, skinID, template.HTML(html)})
 }
