@@ -12,10 +12,10 @@ func TestRemaining(t *testing.T) {
 	policy.AllowedWeekdays[int(now.Weekday())] = true
 	usage := Usage{ChildID: "child-1", TenantID: "family-1", Day: "2026-11-04", ConsumedSeconds: 600}
 	tests := []struct {
-		name string
+		name   string
 		change func(*Policy, *Usage, *string, *time.Time)
-		want int64
-		err error
+		want   int64
+		err    error
 	}{
 		{"remaining", func(*Policy, *Usage, *string, *time.Time) {}, 1200, nil},
 		{"exhausted", func(_ *Policy, u *Usage, _ *string, _ *time.Time) { u.ConsumedSeconds = 1800 }, 0, ErrExhausted},
