@@ -22,18 +22,46 @@ func RenderHTML(cards []ChildCard, skinID string) (string, error) {
 	}
 	const markup = `<section class="yp-family" aria-labelledby="yp-family-title" data-yp-skin="{{.Skin}}">
 <style>
-.yp-family{box-sizing:border-box;{{.CSS}}background:var(--yp-background);color:var(--yp-foreground);padding:1rem;font-family:system-ui,sans-serif}
+.yp-family{box-sizing:border-box;{{.CSS}}--yp-surface:#f6f7fb;--yp-muted:#626879;--yp-line:#d8dce7;--yp-shadow:0 12px 40px #12182b14;background:var(--yp-background);color:var(--yp-foreground);padding:clamp(1rem,3vw,2.5rem);font-family:system-ui,-apple-system,sans-serif;min-height:100vh}
+.yp-family[data-yp-skin="playful"]{--yp-surface:#ffecce;--yp-muted:#625778;--yp-line:#d7bbdd;--yp-shadow:0 14px 32px #4d27621c}
 .yp-family *{box-sizing:border-box}
-.yp-family .yp-grid{display:grid;grid-template-columns:1fr;gap:var(--yp-spacing)}
-.yp-family .yp-card{border:1px solid currentColor;border-radius:var(--yp-radius);padding:1rem;min-width:0}
-.yp-family .yp-actions{display:flex;flex-wrap:wrap;gap:.5rem}
-.yp-family .yp-action{display:inline-block;border:2px solid var(--yp-accent);border-radius:var(--yp-radius);padding:.65rem;min-height:44px}
+.yp-family .yp-shell{max-width:1080px;margin:auto}
+.yp-family .yp-top{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding-bottom:1.5rem}
+.yp-family .yp-logo{font-weight:850;font-size:1.45rem;letter-spacing:-.06em}
+.yp-family .yp-logo span{color:var(--yp-accent)}
+.yp-family .yp-avatar{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:var(--yp-accent);color:white;font-weight:800}
+.yp-family .yp-kicker{text-transform:uppercase;letter-spacing:.14em;font-size:.7rem;font-weight:800;color:var(--yp-accent)}
+.yp-family h1{font-size:clamp(1.8rem,5vw,3rem);letter-spacing:-.055em;line-height:1.1;margin:.4rem 0}
+.yp-family .yp-subtitle{color:var(--yp-muted);margin:.5rem 0 1.5rem}
+.yp-family .yp-summary{display:flex;gap:1rem;align-items:center;padding:1.1rem 1.3rem;background:var(--yp-surface);border-radius:var(--yp-radius);margin-bottom:1.5rem}
+.yp-family .yp-summary-icon{font-size:1.7rem}
+.yp-family .yp-summary strong{display:block}
+.yp-family .yp-summary small{color:var(--yp-muted)}
+.yp-family .yp-grid{display:grid;grid-template-columns:1fr;gap:1rem}
+.yp-family .yp-card{border:1px solid var(--yp-line);border-radius:var(--yp-radius);padding:1.3rem;min-width:0;box-shadow:var(--yp-shadow);background:var(--yp-background)}
+.yp-family .yp-card-head{display:flex;align-items:center;gap:.9rem}
+.yp-family .yp-child-avatar{width:54px;height:54px;border-radius:var(--yp-radius);background:var(--yp-surface);display:grid;place-items:center;font-size:1.4rem;color:var(--yp-accent);font-weight:850}
+.yp-family .yp-card h2{font-size:1.2rem;margin:0;overflow-wrap:anywhere}
+.yp-family .yp-card p{color:var(--yp-muted);font-size:.86rem;margin:.3rem 0 0}
+.yp-family .yp-actions{display:grid;gap:.65rem;margin-top:1.4rem}
+.yp-family .yp-action{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--yp-line);border-radius:var(--yp-radius);padding:.85rem 1rem;min-height:48px;font-weight:650}
+.yp-family .yp-action::after{content:"✓";color:var(--yp-accent);font-weight:800}
+.yp-family .yp-empty{border:1px dashed var(--yp-line);padding:2rem;border-radius:var(--yp-radius)}
+.yp-family .yp-note{margin-top:1.5rem;font-size:.8rem;color:var(--yp-muted)}
 @media(min-width:640px){.yp-family .yp-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(min-width:1000px){.yp-family .yp-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(min-width:1050px){.yp-family .yp-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(prefers-reduced-motion:no-preference){.yp-family .yp-card{transition:transform .2s ease}.yp-family .yp-card:hover{transform:translateY(-3px)}}
 </style>
-<h1 id="yp-family-title">Family</h1>
-<p>Manage each child's devices and contacts separately.</p>
-{{if .Cards}}<div class="yp-grid">{{range .Cards}}<article class="yp-card"><h2>{{.DisplayName}}</h2><div class="yp-actions">{{if .Permissions.ManageDevices}}<span class="yp-action">Devices</span>{{end}}{{if .Permissions.ApproveContacts}}<span class="yp-action">Contacts</span>{{end}}</div></article>{{end}}</div>{{else}}<p>No children available.</p>{{end}}
+<div class="yp-shell">
+<header class="yp-top"><div class="yp-logo">ya<span>puno</span><span aria-hidden="true"> ●</span></div><div class="yp-avatar" aria-label="Demo guardian">G</div></header>
+<main>
+<p class="yp-kicker">Family space</p>
+<h1 id="yp-family-title">Your family, your rules.</h1>
+<p class="yp-subtitle">One safe place to keep your crew connected.</p>
+<div class="yp-summary"><span class="yp-summary-icon" aria-hidden="true">♡</span><div><strong>{{len .Cards}} family profiles</strong><small>Permissions are scoped separately for every child</small></div></div>
+{{if .Cards}}<div class="yp-grid">{{range .Cards}}<article class="yp-card"><div class="yp-card-head"><div class="yp-child-avatar" aria-hidden="true">☺</div><div><h2>{{.DisplayName}}</h2><p>Child profile</p></div></div><div class="yp-actions">{{if .Permissions.ManageDevices}}<span class="yp-action">Devices</span>{{end}}{{if .Permissions.ApproveContacts}}<span class="yp-action">Contacts</span>{{end}}{{if not .Permissions.ManageDevices}}{{if not .Permissions.ApproveContacts}}<p>No management permissions</p>{{end}}{{end}}</div></article>{{end}}</div>{{else}}<p class="yp-empty">No children available.</p>{{end}}
+<p class="yp-note">Preview only · No real accounts, device pairing or editable settings yet.</p>
+</main></div>
 </section>`
 	// CSS is generated exclusively from validated, first-party skin definitions.
 	// Strip :root selector so variables apply to the scoped family element.
