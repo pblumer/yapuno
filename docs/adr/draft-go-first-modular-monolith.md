@@ -1,6 +1,6 @@
 # ADR-DRAFT: Go-first modular monolith with minimal dependencies
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-04; awaiting ADR numbering)
 - **Implementation:** Not started
 - **Date:** 2026-11-03
 - **Deciders:** Yapuno maintainers
@@ -18,7 +18,7 @@ A messaging application for children needs reliable delivery and policy enforcem
 2. Service-heavy microservice architecture with event broker
 3. Full client-side single-page JavaScript framework and serverless backend
 
-## Proposed decision outcome
+## Accepted decision outcome
 Prefer **option 1**. Use standard Go HTTP primitives and explicit package boundaries. Add PostgreSQL or another durable datastore only after a storage ADR; do not invent crypto.
 
 ### Consequences

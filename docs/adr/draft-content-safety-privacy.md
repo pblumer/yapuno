@@ -1,6 +1,6 @@
 # ADR-DRAFT: Transparent content safety and bounded retention
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-04; awaiting ADR numbering)
 - **Implementation:** Not started
 - **Date:** 2026-11-03
 - **Deciders:** Yapuno maintainers; privacy and child-safety reviewers required
@@ -21,7 +21,7 @@ Yapuno may need to discourage harmful links and repeated harassment, including d
 2. Server-wide indiscriminate inspection and permanent parent transcript access
 3. End-to-end encryption and no server-side content moderation; focus solely on client-side and reports
 
-## Proposed decision outcome
+## Accepted decision outcome
 Prefer **option 1** as a *research direction*, not final approval of content scanning. Link allowlists for younger children, locally executed classifiers only after measured evidence, and human decisions for serious cases. No unsupported bullying verdicts. Any architecture that requires server plaintext inspection must not claim server-inaccessible E2EE.
 
 ### Consequences

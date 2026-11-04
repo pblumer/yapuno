@@ -1,6 +1,6 @@
 # ADR-DRAFT: Guardian-managed devices and mutually approved contacts
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-04; awaiting ADR numbering)
 - **Implementation:** Not started
 - **Date:** 2026-11-03
 - **Deciders:** Yapuno maintainers
@@ -19,7 +19,7 @@ Children should not manage passwords or invite arbitrary internet strangers. Mer
 2. Children register publicly, then use optional parental restrictions.
 3. Trust possession of QR or a client-declared tenant/contact ID.
 
-## Proposed decision outcome
+## Accepted decision outcome
 Prefer **option 1**: closed, deny-by-default contact graph and server-backed guardian/device permissions. Evaluate WebAuthn/passkeys for authentication, understanding passkey synchronization; pairing requires independent guardian authorization and a one-time server-side challenge.
 
 ### Consequences

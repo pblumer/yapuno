@@ -1,6 +1,6 @@
 # ADR-DRAFT: Mobile First Experience is the primary delivery contract
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-04; awaiting ADR numbering)
 - **Implementation:** Not started
 - **Date:** 2026-11-03
 - **Deciders:** Yapuno maintainers
@@ -20,7 +20,7 @@ Children and guardians will use Yapuno predominantly on iPhone and Android. A de
 2. Desktop-first web application with a responsive CSS pass later.
 3. Native apps for both platforms immediately.
 
-## Proposed decision outcome
+## Accepted decision outcome
 Prefer **option 1**. **Mobile First Experience (MFE)** is a cross-cutting gate on every feature. Build/test the narrowest supported screen first; then expand to larger phones, tablets and desktop. Evaluate and document PWA constraints on physical iOS/Android before relying on background/notification features.
 
 ### Consequences
