@@ -34,7 +34,7 @@ func newDemoState() *demoState {
 	}
 	return &demoState{
 		children: []familydashboard.Child{{ID: "child-a", TenantID: "demo", DisplayName: "Alex"}, {ID: "child-b", TenantID: "demo", DisplayName: "Sam"}},
-		token: hex.EncodeToString(secret[:]),
+		token:    hex.EncodeToString(secret[:]),
 	}
 }
 
