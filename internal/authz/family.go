@@ -3,11 +3,11 @@ package authz
 // GuardianGrant is an authoritative, persisted relationship between one adult
 // and one child. One adult may hold grants for multiple children and vice versa.
 type GuardianGrant struct {
-	GuardianID string
-	ChildID    string
-	TenantID   string
-	Active     bool
-	CanManageDevices bool
+	GuardianID         string
+	ChildID            string
+	TenantID           string
+	Active             bool
+	CanManageDevices   bool
 	CanApproveContacts bool
 }
 
@@ -44,14 +44,14 @@ const (
 // Consent for child participants must be issued through authorized guardians.
 // Caller must load these values from trusted storage.
 type ContactGrant struct {
-	TenantID string
-	FirstID string
-	SecondID string
-	FirstKind ParticipantKind
-	SecondKind ParticipantKind
-	FirstApproved bool
-	SecondApproved bool
-	Active bool
+	TenantID        string
+	FirstID         string
+	SecondID        string
+	FirstKind       ParticipantKind
+	SecondKind      ParticipantKind
+	FirstApproved   bool
+	SecondApproved  bool
+	Active          bool
 }
 
 // CanContact authorizes the relationship, not the message operation. Device,
