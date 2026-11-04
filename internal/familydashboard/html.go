@@ -48,7 +48,7 @@ func RenderHTML(cards []ChildCard, skinID string) (string, error) {
 .yp-family .yp-action::after{content:"✓";color:var(--yp-accent);font-weight:800}
 .yp-family .yp-empty{border:1px dashed var(--yp-line);padding:2rem;border-radius:var(--yp-radius)}
 .yp-family .yp-note{margin-top:1.5rem;font-size:.8rem;color:var(--yp-muted)}
-@media(min-width:680px){.yp-family .yp-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(min-width:640px){.yp-family .yp-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(min-width:1050px){.yp-family .yp-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(prefers-reduced-motion:no-preference){.yp-family .yp-card{transition:transform .2s ease}.yp-family .yp-card:hover{transform:translateY(-3px)}}
 </style>
