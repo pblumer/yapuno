@@ -20,7 +20,11 @@ jobs:
           cache: false
       - name: Format
         run: |
-          test -z "$(gofmt -l .)"
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            printf "Unformatted Go files:\\n%s\\n" "$unformatted"
+            exit 1
+          fi
       - name: Build
         run: go build ./...
       - name: Vet
