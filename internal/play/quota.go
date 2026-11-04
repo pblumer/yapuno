@@ -9,25 +9,25 @@ import (
 
 var (
 	ErrInvalidPolicy = errors.New("invalid play quota policy")
-	ErrNotAllowed = errors.New("game not allowed")
-	ErrExhausted = errors.New("play quota exhausted")
+	ErrNotAllowed    = errors.New("game not allowed")
+	ErrExhausted     = errors.New("play quota exhausted")
 )
 
 // Policy is configured by an authorized guardian and loaded from trusted storage.
 // DailyLimitSeconds is shared across all games and devices for one child.
 type Policy struct {
-	ChildID string
-	TenantID string
+	ChildID           string
+	TenantID          string
 	DailyLimitSeconds int64
-	AllowedGames map[string]bool
-	AllowedWeekdays [7]bool // Sunday=0, Saturday=6 in the child's configured timezone.
+	AllowedGames      map[string]bool
+	AllowedWeekdays   [7]bool // Sunday=0, Saturday=6 in the child's configured timezone.
 }
 
 // Usage is a committed server-side daily snapshot, not a client-reported timer.
 type Usage struct {
-	ChildID string
-	TenantID string
-	Day string // YYYY-MM-DD in the child's configured timezone.
+	ChildID         string
+	TenantID        string
+	Day             string // YYYY-MM-DD in the child's configured timezone.
 	ConsumedSeconds int64
 }
 
