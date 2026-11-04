@@ -44,8 +44,8 @@ func RenderHTML(cards []ChildCard, skinID string) (string, error) {
 	}
 	var buf bytes.Buffer
 	err = tmpl.Execute(&buf, struct {
-		Skin string
-		CSS template.CSS
+		Skin  string
+		CSS   template.CSS
 		Cards []ChildCard
 	}{Skin: selected.ID, CSS: template.CSS(css), Cards: cards})
 	if err != nil {
