@@ -9,12 +9,12 @@ func TestGuardianGrantScopedToChild(t *testing.T) {
 		{GuardianID: "parent-b", ChildID: "child-1", TenantID: "family", Active: true, CanManageDevices: true},
 	}
 	tests := []struct {
-		name string
-		guardian string
-		child string
-		tenant string
-		grant GuardianGrant
-		wantDevice bool
+		name        string
+		guardian    string
+		child       string
+		tenant      string
+		grant       GuardianGrant
+		wantDevice  bool
 		wantContact bool
 	}{
 		{"first child", "parent-a", "child-1", "family", grants[0], true, true},
@@ -41,8 +41,8 @@ func TestGuardianGrantScopedToChild(t *testing.T) {
 func TestContactPairsAndRevocation(t *testing.T) {
 	for _, pair := range []struct {
 		name string
-		a ParticipantKind
-		b ParticipantKind
+		a    ParticipantKind
+		b    ParticipantKind
 	}{
 		{"child-child", ParticipantChild, ParticipantChild},
 		{"adult-child", ParticipantAdult, ParticipantChild},
