@@ -50,7 +50,7 @@ type ContactGrant struct {
 	FirstKind       ParticipantKind
 	SecondKind      ParticipantKind
 	FirstApproved   bool
-	SecondApproved  bool
+	SecondApproved bool
 	Active          bool
 }
 
