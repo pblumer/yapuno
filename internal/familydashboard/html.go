@@ -37,7 +37,7 @@ func RenderHTML(cards []ChildCard, skinID string) (string, error) {
 </section>`
 	// CSS is generated exclusively from validated, first-party skin definitions.
 	// Strip :root selector so variables apply to the scoped family element.
-	css = css[len(":root{") : len(css)-1]
+	css = css[len(":root{"):len(css)-1]
 	tmpl, err := template.New("dashboard").Parse(markup)
 	if err != nil {
 		return "", err
