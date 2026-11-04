@@ -10,20 +10,20 @@ import (
 
 // Child is a minimal projection. Never include message content in this view.
 type Child struct {
-	ID string
-	TenantID string
+	ID          string
+	TenantID    string
 	DisplayName string
 }
 
 // Permissions expose only actions authorized for the authenticated guardian.
 type Permissions struct {
-	ManageDevices bool
+	ManageDevices   bool
 	ApproveContacts bool
 }
 
 // ChildCard is safe to render after the caller authenticates the guardian.
 type ChildCard struct {
-	ID string
+	ID          string
 	DisplayName string
 	Permissions Permissions
 }
