@@ -44,14 +44,14 @@ const (
 // Consent for child participants must be issued through authorized guardians.
 // Caller must load these values from trusted storage.
 type ContactGrant struct {
-	TenantID        string
-	FirstID         string
-	SecondID        string
-	FirstKind       ParticipantKind
-	SecondKind      ParticipantKind
-	FirstApproved   bool
-	SecondApproved bool
-	Active          bool
+	TenantID	string
+	FirstID	string
+	SecondID	string
+	FirstKind	ParticipantKind
+	SecondKind	ParticipantKind
+	FirstApproved	bool
+	SecondApproved	bool
+	Active	bool
 }
 
 // CanContact authorizes the relationship, not the message operation. Device,
