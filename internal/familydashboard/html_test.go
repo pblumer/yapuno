@@ -16,7 +16,14 @@ func TestRenderHTMLEscapesChildNamesAndFallsBackToKnownSkin(t *testing.T) {
 	if strings.Contains(html, "<script>alert(1)</script>") || strings.Contains(html, "onclick=") {
 		t.Fatal("untrusted input was not escaped or skin was not constrained")
 	}
-	for _, want := range []string{"&lt;script&gt;", "data-yp-skin=\"classic\"", "aria-labelledby", "min-width:640px", "Devices", "Contacts"} {
+	for _, want := range []string{
+		"&lt;script&gt;",
+		"data-yp-skin=\"classic\"",
+		"aria-labelledby",
+		"min-width:640px",
+		"Devices",
+		"Contacts",
+	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q", want)
 		}
