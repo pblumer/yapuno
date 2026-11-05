@@ -3,23 +3,23 @@
 package familystore
 
 import (
-"encoding/json"
-"errors"
-"fmt"
-"os"
-"path/filepath"
-"strings"
-"sync"
-"unicode/utf8"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"unicode/utf8"
 
-"github.com/pblumer/yapuno/internal/authz"
-"github.com/pblumer/yapuno/internal/familydashboard"
+	"github.com/pblumer/yapuno/internal/authz"
+	"github.com/pblumer/yapuno/internal/familydashboard"
 )
 
 var (
-ErrInvalid   = errors.New("invalid family profile")
-ErrDuplicate = errors.New("duplicate family profile")
-ErrForbidden = errors.New("guardian is not authorized for this child")
+	ErrInvalid   = errors.New("invalid family profile")
+	ErrDuplicate = errors.New("duplicate family profile")
+	ErrForbidden = errors.New("guardian is not authorized for this child")
 )
 
 type State struct {
@@ -120,7 +120,7 @@ func (s *Store) Bootstrap(child familydashboard.Child, grant authz.GuardianGrant
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if child.ID == "" || child.TenantID == "" || !validName(child.DisplayName) ||
-	grant.ChildID != child.ID || grant.TenantID != child.TenantID || grant.GuardianID == "" || !grant.Active {
+		grant.ChildID != child.ID || grant.TenantID != child.TenantID || grant.GuardianID == "" || !grant.Active {
 		return ErrInvalid
 	}
 	next := clone(s.state)
