@@ -24,7 +24,7 @@ var (
 
 type State struct {
 	Children []familydashboard.Child `json:"children"`
-	Grants   []authz.GuardianGrant `json:"grants"`
+	Grants   []authz.GuardianGrant   `json:"grants"`
 }
 
 // Store serializes updates and persists each successful update via atomic rename.
