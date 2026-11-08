@@ -34,11 +34,14 @@ type FamilyStore interface {
 
 // New builds a fail-closed handler. It is not a complete application: a real
 // authenticator, secure cookies, HTTPS and account provisioning are required.
-func New(auth Authenticator, store FamilyStore) (http.Handler, error) {
+func New(auth Authenticator, store FamilyStore, enableDevicePages ...bool) (http.Handler, error) {
 	if auth == nil || store == nil {
 		return nil, errors.New("authenticator and store are required")
 	}
 	h := &handler{auth: auth, store: store}
+	if len(enableDevicePages) != 0 {
+		h.devicesEnabled = enableDevicePages[0]
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /family", h.view)
 	mux.HandleFunc("POST /family/rename", h.rename)
@@ -48,6 +51,8 @@ func New(auth Authenticator, store FamilyStore) (http.Handler, error) {
 type handler struct {
 	auth  Authenticator
 	store FamilyStore
+
+	devicesEnabled bool
 }
 
 func (h *handler) session(w http.ResponseWriter, r *http.Request) (Session, bool) {
@@ -80,7 +85,7 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unable to display family", http.StatusInternalServerError)
 		return
 	}
-	const page = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno – Familie</title></head><body>{{.Fragment}}<section aria-label="Kinderprofile bearbeiten"><h2>Profile bearbeiten</h2>{{range .Cards}}{{if and .Permissions.ManageDevices .Permissions.ApproveContacts}}<form method="post" action="/family/rename"><label>Neuer Name für {{.DisplayName}}<input name="name" value="{{.DisplayName}}" required maxlength="40"></label><input type="hidden" name="child_id" value="{{.ID}}"><input type="hidden" name="csrf_token" value="{{$.Token}}"><button type="submit">Speichern</button></form>{{end}}{{end}}</section></body></html>`
+	const page = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno – Familie</title></head><body>{{.Fragment}}<section aria-label="Kinderprofile bearbeiten"><h2>Profile bearbeiten</h2>{{range .Cards}}{{if and .Permissions.ManageDevices .Permissions.ApproveContacts}}<form method="post" action="/family/rename"><label>Neuer Name für {{.DisplayName}}<input name="name" value="{{.DisplayName}}" required maxlength="40"></label><input type="hidden" name="child_id" value="{{.ID}}"><input type="hidden" name="csrf_token" value="{{$.Token}}"><button type="submit">Speichern</button></form>{{end}}{{if and $.DevicesEnabled .Permissions.ManageDevices}}<p><a href="/family/devices?child_id={{.ID}}">Geräte verwalten</a></p>{{end}}{{end}}</section></body></html>`
 	t, err := template.New("page").Parse(page)
 	if err != nil {
 		http.Error(w, "Unable to display family", http.StatusInternalServerError)
@@ -91,7 +96,9 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 		Token    string
 		Cards    []familydashboard.ChildCard
 		Fragment template.HTML
-	}{Token: p.CSRFToken, Cards: cards, Fragment: template.HTML(fragment)}); err != nil {
+
+		DevicesEnabled bool
+	}{Token: p.CSRFToken, Cards: cards, Fragment: template.HTML(fragment), DevicesEnabled: h.devicesEnabled}); err != nil {
 		return
 	}
 }
