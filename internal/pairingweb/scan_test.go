@@ -3,11 +3,10 @@ package pairingweb
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"path/filepath"
 
 	"github.com/pblumer/yapuno/internal/devicepairing"
 )
