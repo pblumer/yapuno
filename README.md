@@ -49,7 +49,7 @@ messaging or production-ready security. See the
 When the optional `YAPUNO_PAIRING_FILE` is configured, authenticated guardians
 can view linked devices, start five-minute pairing challenges and revoke devices
 for their authorized children. See the [setup and limitations](docs/planning/guardian-device-management.md).
-**QR scanning, child-side cryptographic enrollment and device login are not wired to the browser yet.**
+**Browser key-based child enrollment and explicit guardian fingerprint approval are now wired** using a short-lived invitation link. QR image/camera scanning, child device sessions and messaging authorization are still open. See [the browser pairing flow](docs/planning/browser-device-pairing.md).
 
 ## Open source direction
 The repository is public. **A distribution license has not yet been selected; public visibility by itself does not confer a license to reuse the code.** We intend to choose and publish an appropriate OSI-approved license before accepting broader contributions or releasing an installable build.
