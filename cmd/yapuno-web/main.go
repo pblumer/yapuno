@@ -23,6 +23,7 @@ import (
 	"github.com/pblumer/yapuno/internal/guardianlogin"
 	"github.com/pblumer/yapuno/internal/guardianmailer"
 	"github.com/pblumer/yapuno/internal/guardiansession"
+	"github.com/pblumer/yapuno/internal/pairingweb"
 )
 
 // verifiedSessions invalidates already-issued sessions when guardian identity
@@ -66,12 +67,18 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 	mux.Handle("/family", familyRoutes)
 	mux.Handle("/family/", familyRoutes)
 	if len(pairing) != 0 && pairing[0] != nil {
-		deviceRoutes, err := familyweb.NewDevicePages(verifiedSessions{sessions: sessions, directory: directory}, pairing[0])
+		deviceRoutes, err := familyweb.NewDevicePages(verifiedSessions{sessions: sessions, directory: directory}, pairing[0], origin)
 		if err != nil {
 			return nil, err
 		}
 		mux.Handle("/family/devices", deviceRoutes)
 		mux.Handle("/family/devices/", deviceRoutes)
+		childRoutes, err := pairingweb.New(pairing[0])
+		if err != nil {
+			return nil, err
+		}
+		mux.Handle("/pair", childRoutes)
+		mux.Handle("/pair/", childRoutes)
 	}
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/login", http.StatusSeeOther) })
 	// Reject host-header poisoning even behind a TLS-terminating reverse proxy.
