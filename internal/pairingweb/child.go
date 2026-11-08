@@ -11,7 +11,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"strings"
 
 	"github.com/pblumer/yapuno/internal/devicepairing"
 )
@@ -102,8 +101,8 @@ func readRequest(w http.ResponseWriter, r *http.Request) (request, bool) {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return request{}, false
 	}
-	if len(input.Token) != 43 || !strings.ContainsAny(input.Token, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") {
-		// Full base64url validation is done by devicepairing.Store.
+	decodedToken, err := base64.RawURLEncoding.DecodeString(input.Token)
+	if err != nil || len(input.Token) != 43 || len(decodedToken) != 32 {
 		http.Error(w, "Invalid pairing token", http.StatusBadRequest)
 		return request{}, false
 	}
