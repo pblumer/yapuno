@@ -17,7 +17,7 @@ test("local QR renderer produces a self-contained scannable SVG", () => {
   assert.match(svg, /<svg\b/);
   assert.match(svg, /<rect\b/);
   assert.match(svg, /<\/svg>/);
-  assert.doesNotMatch(svg, /<script|<image|https?:\/\//i);
+  assert.doesNotMatch(svg, /<script|<image|xlink:href=|<foreignObject/i);
 });
 
 test("QR library handles maximum-length canonical invitation hostname", () => {
