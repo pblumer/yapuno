@@ -167,11 +167,11 @@ func (h *deviceHandler) start(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; img-src 'self' data:; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 	link := h.origin + "/pair#" + token
 	_ = invitationPage.Execute(w, struct {
-		Token string
+		Token    string
 		Link     string
 		ScanLink string
 		Child    string
-		CSRF  string
+		CSRF     string
 	}{Token: token, Link: link, ScanLink: h.origin + "/pair/scan", Child: form.Get("child_id"), CSRF: p.CSRFToken})
 }
 
