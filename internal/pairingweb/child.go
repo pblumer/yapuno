@@ -21,6 +21,15 @@ var pairHTML []byte
 //go:embed pair.js
 var pairJS []byte
 
+//go:embed scan.html
+var scanHTML []byte
+
+//go:embed scan.js
+var scanJS []byte
+
+//go:embed scan-utils.js
+var scanUtilsJS []byte
+
 type Store interface {
 	Claim(token, name string, publicDER, claimSignature []byte) (string, error)
 	Nonce(token string) (string, error)
@@ -41,6 +50,9 @@ func New(store Store) (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /pair", h.page)
 	mux.HandleFunc("GET /pair/app.js", h.script)
+	mux.HandleFunc("GET /pair/scan", h.scanner)
+	mux.HandleFunc("GET /pair/scan.js", h.scannerScript)
+	mux.HandleFunc("GET /pair/scan-utils.js", h.scannerUtils)
 	mux.HandleFunc("POST /pair/claim", h.claim)
 	mux.HandleFunc("POST /pair/nonce", h.nonce)
 	mux.HandleFunc("POST /pair/finish", h.finish)
@@ -67,6 +79,24 @@ func (h *handler) script(w http.ResponseWriter, _ *http.Request) {
 	securityHeaders(w)
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	_, _ = w.Write(pairJS)
+}
+
+func (h *handler) scanner(w http.ResponseWriter, _ *http.Request) {
+	securityHeaders(w)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(scanHTML)
+}
+
+func (h *handler) scannerScript(w http.ResponseWriter, _ *http.Request) {
+	securityHeaders(w)
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	_, _ = w.Write(scanJS)
+}
+
+func (h *handler) scannerUtils(w http.ResponseWriter, _ *http.Request) {
+	securityHeaders(w)
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	_, _ = w.Write(scanUtilsJS)
 }
 
 type request struct {
