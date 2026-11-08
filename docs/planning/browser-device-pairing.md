@@ -1,19 +1,28 @@
 # Browser device pairing: child key and guardian approval
 
-**Status:** End-to-end browser **link-based** engineering preview for synthetic
-child profiles. A QR image, camera scanning and production device sessions are
-still **not implemented**. Never use this with real children's data.
+**Status:** End-to-end QR-or-link browser engineering preview for synthetic
+child profiles. The guardian QR image is created locally; children can scan
+using the native phone camera or the optional in-browser scanner. Browser camera
+recognition depends on `BarcodeDetector` support. Production device sessions
+and real-device compatibility validation remain **not implemented**. Never use
+this with real children's data.
 
 ## What works in the preview
 
 1. A verified guardian logs into the existing HTTPS Yapuno web preview, opens
    **Familie → Geräte verwalten**, and chooses **Pairing-Code erzeugen**.
-2. The page shows a unique, five-minute invitation URL of the form
-   `https://configured-yapuno-host/pair#<one-time-token>`. The secret sits in
-   the URL *fragment*, not in the HTTP request path or query; the child page
-   strips it from the browser address bar immediately on load.
-3. Open the link on the **child device** using a current browser over HTTPS.
-   The child selects a device name and taps **Gerät vorbereiten**. Browser
+2. The page shows a locally generated **QR code**, copy/share buttons and a
+   unique, five-minute invitation URL of the form
+   `https://configured-yapuno-host/pair#<one-time-token>`. No third-party QR
+   service receives the link. The secret sits in the URL *fragment*, not in
+   HTTP request paths or queries; the child page strips it from the browser
+   address bar immediately on load.
+3. On the **child device**, scan the parent QR with the native phone camera
+   (recommended fallback) or open `/pair/scan` and choose **Kamera starten**.
+   Where `BarcodeDetector` is unavailable, the page explains how to use the
+   phone's normal camera or paste a link shared by the guardian. The scanner
+   accepts **only same-origin** Yapuno `/pair#...` URLs. The child then
+   selects a device name and taps **Gerät vorbereiten**. Browser
    WebCrypto generates a **non-extractable P-256 private key**, stores it in
    IndexedDB for later use, and sends only the public SPKI key plus an ECDSA
    claim signature. The backend stores the fingerprint, not the raw token.
@@ -53,9 +62,12 @@ cookies. The token does **not** authenticate a child for chat or other APIs.
 
 ## Required before a real pilot
 
-- Render a local QR code for the link and implement camera scanning with an
-  accessible, guardian-assisted fallback on iOS Safari and Android Chrome.
-  Do not rely on remote QR services: the code is a temporary credential.
+- **Implemented in code:** offline QR creation (vendored Kazuhiko Arase
+  QR generator, MIT), accessible scanner page, optional in-browser camera
+  detection using `BarcodeDetector`, native camera app and shared-link
+  fallbacks. **Still required:** test the QR scan path on actual iOS Safari,
+  Android Chrome, and camera-denied browsers; ensure accessibility and
+  reliable sharing, including when no `BarcodeDetector` is present.
 - Test WebCrypto and IndexedDB on actual phones, private browsing, restored
   tabs and shared family devices; implement safe key recovery, replacement,
   logout, and device-session authentication with every request authorized.
@@ -68,6 +80,7 @@ cookies. The token does **not** authenticate a child for chat or other APIs.
   child-safety/privacy/security review.
 
 Automated tests cover request-origin rejection, invalid and forged keys,
-CSRF and cross-child guardian approval, correct fingerprint, approval before
-finish, replay detection and persistence. **Tests are not substitutes for
+CSRF and cross-child guardian approval, fingerprint verification, replay and
+persistence, locally generated QR SVG matrix structure, and rejection of
+phishing/cross-origin/token-query scan links. **Tests are not substitutes for
 mobile-browser E2E validation.**
