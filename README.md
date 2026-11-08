@@ -30,5 +30,19 @@ go vet ./...
 ## Guardian passwordless login (experimental)
 An invitation-only email-link flow is available as an **internal component** in `internal/guardianlogin`: expiring single-use challenges, no automatic accounts, and revalidation before issuing a guardian session. It is **not wired to a production login service**: verified guardian directory, real email sender, deployment and safety review are still required. See [draft login ADR](docs/adr/draft-guardian-passwordless-email.md).
 
+## Browser login engineering preview
+
+A startable guardian login and family dashboard are available as an **engineering
+preview for synthetic profiles** only. The `cmd/yapuno-provision` offline CLI
+provisions a verified guardian and example child, while `cmd/yapuno-web`
+connects passwordless email links, mandatory-TLS SMTP, opaque sessions and
+live authorization checks to the family UI.
+
+The preview requires a real HTTPS domain behind a trusted local reverse proxy,
+a pre-provisioned private data directory, and SMTP credentials. It does not
+support public self-registration, child device onboarding, real contacts,
+messaging or production-ready security. See the
+[setup and safety limitations](docs/planning/guardian-browser-login-runtime.md).
+
 ## Open source direction
 The repository is public. **A distribution license has not yet been selected; public visibility by itself does not confer a license to reuse the code.** We intend to choose and publish an appropriate OSI-approved license before accepting broader contributions or releasing an installable build.
