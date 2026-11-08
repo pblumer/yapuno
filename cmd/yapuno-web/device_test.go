@@ -77,4 +77,13 @@ func TestOptionalGuardianDeviceRoutes(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("CSRF accepted: %d", w.Code)
 	}
+	for _, pairPath := range []string{"/pair", "/pair/app.js"} {
+		anonymous := httptest.NewRequest(http.MethodGet, "https://app.example.org"+pairPath, nil)
+		w = httptest.NewRecorder()
+		handler.ServeHTTP(w, anonymous)
+		if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("child pairing route %s missing or cacheable: %d", pairPath, w.Code)
+		}
+	}
+
 }

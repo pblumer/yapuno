@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Yapuno – Kindergerät koppeln</title>
+<style>
+:root{color-scheme:light;font-family:system-ui,-apple-system,sans-serif;color:#1c2845;background:#f7f9fd}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:1rem}
+main{max-width:490px;margin:0 auto;padding:clamp(1.3rem,5vw,2.2rem);background:white;border-radius:22px;box-shadow:0 10px 32px #1c284514}
+header{font-weight:850;font-size:1.5rem;letter-spacing:-.06em;margin-bottom:2rem;color:#4338ca}
+h1{font-size:clamp(1.6rem,7vw,2.15rem);line-height:1.13}
+p{line-height:1.55;color:#45516a}label{display:block;font-weight:650;margin:1.5rem 0 .5rem}
+input{width:100%;font:inherit;min-height:48px;border:1px solid #aab4c9;border-radius:12px;padding:.7rem .9rem}
+button{background:#4338ca;border:0;color:#fff;padding:1rem 1.3rem;min-height:48px;border-radius:14px;font:inherit;font-weight:700;cursor:pointer;margin-top:1rem;width:100%}
+button:disabled{opacity:.6;cursor:not-allowed}button:focus-visible,input:focus-visible{outline:3px solid #8bb6ff;outline-offset:3px}
+code{display:block;overflow-wrap:anywhere;letter-spacing:.07em;background:#eef1ff;border-radius:12px;padding:1rem;font-size:.9rem;line-height:1.7;user-select:all}
+.panel{background:#edf7f0;border:1px solid #bce5c8;border-radius:15px;padding:1rem;margin-top:1.5rem}
+#status{min-height:1.5rem;font-weight:600}small{color:#65718a}
+</style>
+</head>
+<body>
+<main>
+<header>yapuno <span aria-hidden="true">✳</span></header>
+<h1>Dein Gerät verbinden</h1>
+<p>Du brauchst kein Passwort. Öffne diesen Link auf dem Gerät, das du mit deiner Familie verbinden möchtest.</p>
+<p id="status" role="status" aria-live="polite">Einladungslink prüfen …</p>
+<form id="join" hidden>
+<label for="device-name">Wie heisst dieses Gerät?</label>
+<input id="device-name" name="device-name" required maxlength="64" value="Mein Gerät" autocomplete="off">
+<button id="join-button" type="submit">Gerät vorbereiten</button>
+</form>
+<section id="confirmation" hidden class="panel" aria-label="Freigabe">
+<h2>Fast geschafft!</h2>
+<p>Vergleiche diesen <strong>Geräte-Fingerabdruck</strong> mit der Anzeige auf dem Gerät deiner Eltern. Sie müssen dieselbe Zeichenfolge bestätigen.</p>
+<code id="fingerprint"></code>
+<button type="button" id="check">Freigabe prüfen</button>
+<p><small>Nach der Freigabe wird die sichere Gerätebindung abgeschlossen.</small></p>
+</section>
+<section id="completed" hidden class="panel">
+<h2>Gerät verbunden ✓</h2>
+<p>Das Gerät wurde registriert. Der Kinderchat ist noch nicht freigeschaltet – daran wird gearbeitet.</p>
+</section>
+<p><small>Technische Vorschau – noch nicht für echte Kinderdaten freigegeben.</small></p>
+</main>
+<script src="/pair/app.js" defer></script>
+</body>
+</html>
