@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Yapuno – QR scannen</title>
+<style>
+:root{font:16px system-ui,-apple-system,sans-serif;background:#f7f9fd;color:#1c2845}
+*{box-sizing:border-box}body{margin:0;padding:1rem}main{max-width:520px;margin:0 auto;background:white;border-radius:22px;padding:clamp(1.2rem,5vw,2.5rem);box-shadow:0 12px 28px #1c284511}
+header{font-size:1.5rem;font-weight:850;color:#4338ca;letter-spacing:-.04em;margin-bottom:1.6rem}
+h1{font-size:clamp(1.5rem,6vw,2.1rem)}p{line-height:1.5;color:#475569}
+button{min-height:48px;padding:.8rem 1rem;border:0;border-radius:12px;background:#4338ca;color:white;font:inherit;font-weight:700;cursor:pointer}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #69b9ff;outline-offset:3px}
+video{display:block;max-width:100%;width:100%;background:#0c162e;border-radius:16px;margin:1rem 0}
+a{color:#4338ca}label{display:block;margin:1rem 0 .4rem;font-weight:650}
+input{min-height:48px;width:100%;padding:.7rem;border:1px solid #aab4c9;border-radius:12px;font:inherit}
+section{border-top:1px solid #dee4f0;margin-top:1.7rem;padding-top:1.3rem}small{color:#65718a}
+#status{min-height:1.5rem;font-weight:650}
+</style>
+</head>
+<body><main>
+<header>yapuno ✳</header>
+<h1>QR-Code scannen</h1>
+<p>Halte die Kamera vor den QR-Code, den deine Eltern auf ihrem Gerät anzeigen.</p>
+<p id="status" role="status" aria-live="polite">Kamera noch nicht gestartet.</p>
+<button id="start-camera" type="button">Kamera starten</button>
+<button id="stop-camera" type="button" hidden>Kamera ausschalten</button>
+<video id="camera" playsinline muted autoplay hidden aria-label="Kamera zur Erkennung des Yapuno QR-Codes"></video>
+<section>
+<h2>Falls die Kamera nicht funktioniert</h2>
+<p>Du kannst auch die normale Kamera-App deines Handys öffnen und den QR-Code fotografieren. Tippe dann auf den Yapuno-Link, der angezeigt wird.</p>
+<p>Wenn dir deine Eltern den Einladungslink geschickt haben, kannst du ihn hier einfügen:</p>
+<form id="paste-link">
+<label for="invite-url">Yapuno-Einladungslink</label>
+<input id="invite-url" inputmode="url" type="url" autocomplete="off" spellcheck="false" placeholder="https://.../pair#..." required>
+<button type="submit">Einladungslink öffnen</button>
+</form>
+</section>
+<p><small>Nur Einladungen von dieser Yapuno-Webseite werden akzeptiert. Noch keine Freigabe für echte Kinderdaten.</small></p>
+</main>
+<script src="/pair/scan-utils.js" defer></script>
+<script src="/pair/scan.js" defer></script>
+</body></html>

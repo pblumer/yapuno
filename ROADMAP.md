@@ -9,7 +9,7 @@ Status: **initial design**, not production-ready. GitHub issues are the delivery
 - [ ] [#9](https://github.com/pblumer/yapuno/issues/9): merge-time ADR numbering automation (later; drafts stay unnumbered now)
 
 ## First Hello — private text chat
-- [ ] [#2](https://github.com/pblumer/yapuno/issues/2): guardian-managed registration, passwordless pairing and device revocation (engineering browser runtime, SMTP delivery and durable pairing core implemented for synthetic families; reviewed onboarding, link-based child WebCrypto claim, guardian fingerprint approval and key-bound finish implemented as synthetic browser preview; QR image/camera UX, child device sessions, production security and shared storage still open)
+- [ ] [#2](https://github.com/pblumer/yapuno/issues/2): guardian-managed registration, passwordless pairing and device revocation (engineering browser runtime, SMTP delivery and durable pairing core implemented for synthetic families; reviewed onboarding, link-based child WebCrypto claim, guardian fingerprint approval and key-bound finish implemented as synthetic browser preview; local QR rendering and optional browser camera scanner added with native-camera/shared-link fallback; real iOS/Android compatibility testing, child device sessions, production security and shared storage still open)
 - [ ] [#3](https://github.com/pblumer/yapuno/issues/3): cross-tenant isolation, mutual guardian contact approval, closed circles
 - [ ] [#4](https://github.com/pblumer/yapuno/issues/4): durable, idempotent one-to-one text chat and reconnection
 - [ ] [#5](https://github.com/pblumer/yapuno/issues/5): **Mobile First Experience**, installable PWA, accessible child interface and parent portal
