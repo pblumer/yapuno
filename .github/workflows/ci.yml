@@ -25,6 +25,8 @@ jobs:
             printf "Unformatted Go files:\\n%s\\n" "$unformatted"
             exit 1
           fi
+      - name: Browser pairing JavaScript syntax
+        run: node --check internal/pairingweb/pair.js
       - name: Build
         run: go build ./...
       - name: Vet
