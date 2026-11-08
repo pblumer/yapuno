@@ -1,8 +1,10 @@
 # Guardian device management — browser preview
 
-**Status:** The guardian-facing part of Magic Pairing is now wired to the
+**Status:** The guardian-facing part of Magic Pairing is wired to the
 existing browser login. This is an engineering preview for synthetic child
-profiles, **not** complete child-device enrollment or a child-safe service.
+profiles. A link-based child WebCrypto and guardian fingerprint approval flow
+is now implemented, but QR camera UX and child device sessions are still
+missing; it is **not** a child-safe service.
 
 ## Enable the device pages
 
@@ -40,10 +42,10 @@ HTML-escaped and responses disable caches and third-party content.
 
 ## Next required delivery
 
-The **child-side** pairing client still needs a standards-based WebCrypto
-P-256 key in non-exportable persistent browser storage, proof-of-possession
-claim, a QR camera and fallback UX, fingerprint comparison on both screens,
-authenticated guardian approval, nonce response and final device binding.
+The **link-based child-side** WebCrypto pairing, proof of possession,
+fingerprint comparison, guardian approval and nonce-bound completion are
+implemented. A QR image generator, actual camera scanning and fallback UX
+still need device testing and implementation.
 This must have negative security tests, mobile/browser validation, origin and
 logging rules for the QR secret, abuse limits, key rotation and recovery.
 
