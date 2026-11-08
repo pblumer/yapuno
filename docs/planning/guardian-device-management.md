@@ -1,0 +1,53 @@
+# Guardian device management — browser preview
+
+**Status:** The guardian-facing part of Magic Pairing is now wired to the
+existing browser login. This is an engineering preview for synthetic child
+profiles, **not** complete child-device enrollment or a child-safe service.
+
+## Enable the device pages
+
+With the private data directory from
+[guardian login setup](guardian-browser-login-runtime.md), add:
+
+```sh
+export YAPUNO_PAIRING_FILE=private/pairing.json
+go run ./cmd/yapuno-web
+```
+
+The file is created with mode `0600` when the first challenge is started.
+Keep the data directory private and outside source control. The web server
+remains restricted to loopback and must be served through the configured HTTPS
+reverse proxy. Without `YAPUNO_PAIRING_FILE`, device pages and links are not
+mounted.
+
+After authenticated guardian login, open **Familie** and choose
+**Geräte verwalten** for a child. The page lists that child's devices,
+including revoked ones, and offers:
+
+- **Pairing-Code erzeugen:** creates a fresh five-minute challenge. The secret
+  appears only in the no-store response, not in the durable store. This is
+  currently a developer code, **not a working QR/camera flow**.
+- **Sperren:** requires a current guardian session, the session CSRF token,
+  explicit confirmation and active, child-scoped device-management permission.
+  Revocation is checked by subsequent `ActiveDevice` calls. Existing
+  future device sessions must also be invalidated in the actual messenger.
+
+All guardian and tenant identifiers are obtained from the authenticated
+session, not the request. The backend checks authorization again for list,
+start and revoke operations. Unauthenticated access, wrong children, wrong
+tenants, forged CSRF tokens and duplicate inputs are denied. Form output is
+HTML-escaped and responses disable caches and third-party content.
+
+## Next required delivery
+
+The **child-side** pairing client still needs a standards-based WebCrypto
+P-256 key in non-exportable persistent browser storage, proof-of-possession
+claim, a QR camera and fallback UX, fingerprint comparison on both screens,
+authenticated guardian approval, nonce response and final device binding.
+This must have negative security tests, mobile/browser validation, origin and
+logging rules for the QR secret, abuse limits, key rotation and recovery.
+
+The JSON persistence is single-process/single-writer only. A transactional
+shared backend and revocation propagation are required for multi-instance
+operation, including horizontal scale-out. Do not use real child data until
+the independent pilot-readiness gate passes.

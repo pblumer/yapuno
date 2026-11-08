@@ -1,7 +1,7 @@
 # ADR-DRAFT: Guardian-managed devices and mutually approved contacts
 
 - **Status:** Accepted (2026-11-04; awaiting ADR numbering)
-- **Implementation:** Not started
+- **Implementation:** Partial (durable pairing core and authenticated guardian device pages; child-side QR/approval completion and device sessions open)
 - **Date:** 2026-11-03
 - **Deciders:** Yapuno maintainers
 

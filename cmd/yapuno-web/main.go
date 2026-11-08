@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pblumer/yapuno/internal/devicepairing"
 	"github.com/pblumer/yapuno/internal/familystore"
 	"github.com/pblumer/yapuno/internal/familyweb"
 	"github.com/pblumer/yapuno/internal/guardiandirectory"
@@ -42,7 +43,7 @@ func (v verifiedSessions) Authenticate(r *http.Request) (familyweb.Session, erro
 	return session, nil
 }
 
-func newHandler(origin string, store *familystore.Store, directory *guardiandirectory.Directory, sender guardianlogin.Sender, sessions *guardiansession.Manager) (http.Handler, error) {
+func newHandler(origin string, store *familystore.Store, directory *guardiandirectory.Directory, sender guardianlogin.Sender, sessions *guardiansession.Manager, pairing ...*devicepairing.Store) (http.Handler, error) {
 	if store == nil || directory == nil || sender == nil || sessions == nil {
 		return nil, errors.New("missing trusted Yapuno dependency")
 	}
@@ -50,7 +51,7 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 	if err != nil {
 		return nil, err
 	}
-	family, err := familyweb.New(verifiedSessions{sessions: sessions, directory: directory}, store)
+	family, err := familyweb.New(verifiedSessions{sessions: sessions, directory: directory}, store, len(pairing) != 0 && pairing[0] != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +65,14 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 	mux.Handle("/login/", loginRoutes)
 	mux.Handle("/family", familyRoutes)
 	mux.Handle("/family/", familyRoutes)
+	if len(pairing) != 0 && pairing[0] != nil {
+		deviceRoutes, err := familyweb.NewDevicePages(verifiedSessions{sessions: sessions, directory: directory}, pairing[0])
+		if err != nil {
+			return nil, err
+		}
+		mux.Handle("/family/devices", deviceRoutes)
+		mux.Handle("/family/devices/", deviceRoutes)
+	}
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/login", http.StatusSeeOther) })
 	// Reject host-header poisoning even behind a TLS-terminating reverse proxy.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +89,7 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1:8086", "loopback address for trusted HTTPS reverse proxy")
 	storePath := flag.String("families", os.Getenv("YAPUNO_FAMILIES_FILE"), "durable family state file")
 	guardiansPath := flag.String("guardians", os.Getenv("YAPUNO_GUARDIANS_FILE"), "offline-provisioned guardian identity file (0600)")
+	pairingPath := flag.String("pairing", os.Getenv("YAPUNO_PAIRING_FILE"), "optional private device pairing file")
 	flag.Parse()
 	host, _, err := net.SplitHostPort(*listen)
 	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
@@ -96,6 +106,13 @@ func main() {
 	if err != nil {
 		log.Fatal("guardian directory unavailable or not private (0600)")
 	}
+	var pairingStore *devicepairing.Store
+	if *pairingPath != "" {
+		pairingStore, err = devicepairing.Open(*pairingPath, store, time.Now)
+		if err != nil {
+			log.Fatal("device pairing store unavailable or insecure")
+		}
+	}
 	smtpPort := 465
 	sender, err := guardianmailer.New(guardianmailer.Config{
 		Host: os.Getenv("YAPUNO_SMTP_HOST"), Port: smtpPort,
@@ -109,7 +126,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	handler, err := newHandler(*origin, store, directory, sender, sessions)
+	handler, err := newHandler(*origin, store, directory, sender, sessions, pairingStore)
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}

@@ -44,5 +44,12 @@ support public self-registration, child device onboarding, real contacts,
 messaging or production-ready security. See the
 [setup and safety limitations](docs/planning/guardian-browser-login-runtime.md).
 
+## Guardian device management (preview)
+
+When the optional `YAPUNO_PAIRING_FILE` is configured, authenticated guardians
+can view linked devices, start five-minute pairing challenges and revoke devices
+for their authorized children. See the [setup and limitations](docs/planning/guardian-device-management.md).
+**QR scanning, child-side cryptographic enrollment and device login are not wired to the browser yet.**
+
 ## Open source direction
 The repository is public. **A distribution license has not yet been selected; public visibility by itself does not confer a license to reuse the code.** We intend to choose and publish an appropriate OSI-approved license before accepting broader contributions or releasing an installable build.
