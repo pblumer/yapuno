@@ -26,7 +26,14 @@ jobs:
             exit 1
           fi
       - name: Browser pairing JavaScript syntax
-        run: node --check internal/pairingweb/pair.js
+        run: |
+          node --check internal/pairingweb/pair.js
+          node --check internal/pairingweb/scan.js
+          node --check internal/pairingweb/scan-utils.js
+          node --check internal/familyweb/qr-render.js
+          node --check internal/familyweb/qrcode.vendor.js
+      - name: QR scanner and offline generator tests
+        run: node --test internal/pairingweb/scan_utils.test.cjs internal/familyweb/qr_render.test.cjs
       - name: Build
         run: go build ./...
       - name: Vet
