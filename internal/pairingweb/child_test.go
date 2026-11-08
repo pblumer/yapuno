@@ -123,7 +123,9 @@ func TestChildPairingHTTPCompletesOnlyAfterGuardianApproval(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("finish: %d %s", w.Code, w.Body.String())
 	}
-	var bound struct{ DeviceID string `json:"device_id"` }
+	var bound struct {
+		DeviceID string `json:"device_id"`
+	}
 	if err := json.Unmarshal(w.Body.Bytes(), &bound); err != nil || bound.DeviceID == "" {
 		t.Fatalf("missing device ID: %+v %v", bound, err)
 	}
