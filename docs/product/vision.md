@@ -4,7 +4,7 @@
 
 A warm, playful and **closed** space to communicate for children and teens. No public stranger discovery, engagement feed, ads, phone number or child-managed passwords. Parent/guardian-approved contacts and devices are the default; children have age-appropriate autonomy and dignity.
 
-**Primary users:** children roughly 5–16 years old using iPhones and Android phones (or Wi-Fi-only devices). Secondary users: guardians managing approvals and recovery. Potential later tenants: families, school classes, clubs.
+**Primary users:** children roughly 5–16 years old using iPhones and Android phones (or Wi-Fi-only devices). Secondary users: guardians managing approvals and recovery. Potential future opt-in communities: private school-class groups and clubs, then verified school organizations, as a separate trust boundary from each family's tenant. See [Communities & Classrooms](../planning/communities-classrooms.md); no direct-contact permission is implied by community membership.
 
 **First Hello:** two children, each with a parent-approved device, can exchange text messages through mutually approved contacts via Wi-Fi. Other tenants, unauthorized devices and contacts must not see, send or subscribe to these messages.
 

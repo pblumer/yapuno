@@ -13,3 +13,4 @@ Yapuno follows an Atlas-inspired ADR process. An ADR states **why** a choice is 
 - [Guardian-managed authorization and contact trust](draft-guardian-contact-trust.md)
 - [Mobile First Experience](draft-mobile-first-experience.md)
 - [Transparent content safety and retention](draft-content-safety-privacy.md)
+- [Communities & Classrooms (proposed, future)](draft-communities-classrooms.md)
