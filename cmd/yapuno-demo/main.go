@@ -11,12 +11,14 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/pblumer/yapuno/internal/authz"
 	"github.com/pblumer/yapuno/internal/familydashboard"
+	"github.com/pblumer/yapuno/internal/skin"
 )
 
 type demoState struct {
@@ -94,7 +96,7 @@ func (s *demoState) view(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unable to render demo", http.StatusInternalServerError)
 		return
 	}
-	const page = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno Family Demo</title></head><body><nav aria-label="Demo Skins"><a href="/?skin=classic">Classic</a> | <a href="/?skin=playful">Playful</a></nav><p>DEMO ONLY – nur Beispieldaten, keine Anmeldung oder echte Verwaltung.</p><form action="/profiles" method="post"><label for="name">Demo-Kinderprofil hinzufügen</label> <input id="name" name="name" maxlength="40" required><input type="hidden" name="token" value="{{.Token}}"><input type="hidden" name="skin" value="{{.Skin}}"><button type="submit">Hinzufügen</button></form>{{.Dashboard}}</body></html>`
+	const page = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno Family Demo</title></head><body><nav aria-label="Demo Skins">{{range $i, $s := .Skins}}{{if $i}} | {{end}}<a href="/?skin={{$s.ID}}">{{$s.Name}}</a>{{end}}</nav><p>DEMO ONLY – nur Beispieldaten, keine Anmeldung oder echte Verwaltung.</p><form action="/profiles" method="post"><label for="name">Demo-Kinderprofil hinzufügen</label> <input id="name" name="name" maxlength="40" required><input type="hidden" name="token" value="{{.Token}}"><input type="hidden" name="skin" value="{{.Skin}}"><button type="submit">Hinzufügen</button></form>{{.Dashboard}}</body></html>`
 	t, err := template.New("page").Parse(page)
 	if err != nil {
 		http.Error(w, "Template error", http.StatusInternalServerError)
@@ -105,8 +107,25 @@ func (s *demoState) view(w http.ResponseWriter, r *http.Request) {
 
 		Skin string
 
+		Skins []skin.Definition
+
 		Dashboard template.HTML
-	}{token, skinID, template.HTML(html)})
+	}{token, skinID, sortedSkins(), template.HTML(html)})
+}
+
+// sortedSkins lists first-party skins in a stable order for the demo menu.
+func sortedSkins() []skin.Definition {
+	catalog := skin.Catalog()
+	ids := make([]string, 0, len(catalog))
+	for id := range catalog {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	skins := make([]skin.Definition, 0, len(ids))
+	for _, id := range ids {
+		skins = append(skins, catalog[id])
+	}
+	return skins
 }
 
 func main() {

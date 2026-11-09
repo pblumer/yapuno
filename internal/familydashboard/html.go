@@ -12,42 +12,38 @@ import (
 // This function is a renderer, not an authorization boundary or HTTP endpoint.
 func RenderHTML(cards []ChildCard, skinID string) (string, error) {
 	catalog := skin.Catalog()
-	selected, ok := catalog[skinID]
-	if !ok {
-		selected = catalog["classic"]
-	}
+	selected := skin.Resolve(skinID, catalog, catalog["classic"])
 	css, err := skin.CSSVariables(selected)
 	if err != nil {
 		return "", err
 	}
 	const markup = `<section class="yp-family" aria-labelledby="yp-family-title" data-yp-skin="{{.Skin}}">
 <style>
-.yp-family{box-sizing:border-box;{{.CSS}}--yp-surface:#f6f7fb;--yp-muted:#626879;--yp-line:#d8dce7;--yp-shadow:0 12px 40px #12182b14;background:var(--yp-background);color:var(--yp-foreground);padding:clamp(1rem,3vw,2.5rem);font-family:system-ui,-apple-system,sans-serif;min-height:100vh}
-.yp-family[data-yp-skin="playful"]{--yp-surface:#ffecce;--yp-muted:#625778;--yp-line:#d7bbdd;--yp-shadow:0 14px 32px #4d27621c}
+.yp-family{box-sizing:border-box;{{.CSS}}--yp-shadow:0 12px 40px rgba(18,24,43,.08);background-color:var(--yp-bg);background-image:var(--yp-wallpaper);background-size:var(--yp-wallpaper-size);color:var(--yp-text);padding:clamp(1rem,3vw,2.5rem);font-family:var(--yp-font-body);font-size:var(--yp-font-size);min-height:100vh}
 .yp-family *{box-sizing:border-box}
 .yp-family .yp-shell{max-width:1080px;margin:auto}
 .yp-family .yp-top{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding-bottom:1.5rem}
-.yp-family .yp-logo{font-weight:850;font-size:1.45rem;letter-spacing:-.06em}
-.yp-family .yp-logo span{color:var(--yp-accent)}
-.yp-family .yp-avatar{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:var(--yp-accent);color:white;font-weight:800}
-.yp-family .yp-kicker{text-transform:uppercase;letter-spacing:.14em;font-size:.7rem;font-weight:800;color:var(--yp-accent)}
-.yp-family h1{font-size:clamp(1.8rem,5vw,3rem);letter-spacing:-.055em;line-height:1.1;margin:.4rem 0}
-.yp-family .yp-subtitle{color:var(--yp-muted);margin:.5rem 0 1.5rem}
+.yp-family .yp-logo{font-family:var(--yp-font-heading);font-weight:850;font-size:1.45rem;letter-spacing:-.06em}
+.yp-family .yp-logo span{color:var(--yp-accent-text)}
+.yp-family .yp-avatar{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:var(--yp-accent);color:var(--yp-on-accent);font-weight:800}
+.yp-family .yp-kicker{text-transform:uppercase;letter-spacing:.14em;font-size:.7rem;font-weight:800;color:var(--yp-accent-text)}
+.yp-family h1{font-family:var(--yp-font-heading);font-size:clamp(1.8rem,5vw,3rem);letter-spacing:-.055em;line-height:1.1;margin:.4rem 0}
+.yp-family .yp-subtitle{color:var(--yp-text-muted);margin:.5rem 0 1.5rem}
 .yp-family .yp-summary{display:flex;gap:1rem;align-items:center;padding:1.1rem 1.3rem;background:var(--yp-surface);border-radius:var(--yp-radius);margin-bottom:1.5rem}
 .yp-family .yp-summary-icon{font-size:1.7rem}
 .yp-family .yp-summary strong{display:block}
-.yp-family .yp-summary small{color:var(--yp-muted)}
+.yp-family .yp-summary small{color:var(--yp-text-muted)}
 .yp-family .yp-grid{display:grid;grid-template-columns:1fr;gap:1rem}
-.yp-family .yp-card{border:1px solid var(--yp-line);border-radius:var(--yp-radius);padding:1.3rem;min-width:0;box-shadow:var(--yp-shadow);background:var(--yp-background)}
+.yp-family .yp-card{border:1px solid var(--yp-line);border-radius:var(--yp-radius);padding:1.3rem;min-width:0;box-shadow:var(--yp-shadow);background:var(--yp-bg)}
 .yp-family .yp-card-head{display:flex;align-items:center;gap:.9rem}
-.yp-family .yp-child-avatar{width:54px;height:54px;border-radius:var(--yp-radius);background:var(--yp-surface);display:grid;place-items:center;font-size:1.4rem;color:var(--yp-accent);font-weight:850}
-.yp-family .yp-card h2{font-size:1.2rem;margin:0;overflow-wrap:anywhere}
-.yp-family .yp-card p{color:var(--yp-muted);font-size:.86rem;margin:.3rem 0 0}
+.yp-family .yp-child-avatar{width:54px;height:54px;border-radius:var(--yp-radius);background:var(--yp-surface);display:grid;place-items:center;font-size:1.4rem;color:var(--yp-accent-text);font-weight:850}
+.yp-family .yp-card h2{font-family:var(--yp-font-heading);font-size:1.2rem;margin:0;overflow-wrap:anywhere}
+.yp-family .yp-card p{color:var(--yp-text-muted);font-size:.86rem;margin:.3rem 0 0}
 .yp-family .yp-actions{display:grid;gap:.65rem;margin-top:1.4rem}
 .yp-family .yp-action{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--yp-line);border-radius:var(--yp-radius);padding:.85rem 1rem;min-height:48px;font-weight:650}
-.yp-family .yp-action::after{content:"✓";color:var(--yp-accent);font-weight:800}
+.yp-family .yp-action::after{content:"✓";color:var(--yp-accent-text);font-weight:800}
 .yp-family .yp-empty{border:1px dashed var(--yp-line);padding:2rem;border-radius:var(--yp-radius)}
-.yp-family .yp-note{margin-top:1.5rem;font-size:.8rem;color:var(--yp-muted)}
+.yp-family .yp-note{margin-top:1.5rem;font-size:.8rem;color:var(--yp-text-muted)}
 @media(min-width:640px){.yp-family .yp-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(min-width:1050px){.yp-family .yp-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(prefers-reduced-motion:no-preference){.yp-family .yp-card{transition:transform .2s ease}.yp-family .yp-card:hover{transform:translateY(-3px)}}

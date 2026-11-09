@@ -2,52 +2,104 @@ package skin
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
-// CSSVariables serializes vetted color and layout tokens to CSS custom
-// properties. It never accepts arbitrary CSS declarations or asset URLs.
+// CSSVariables serializes a validated skin to CSS custom properties wrapped in
+// a :root rule. Every emitted value is a validated hex color or a fixed string
+// chosen from a closed vocabulary; no skin-provided text is interpolated.
 func CSSVariables(s Definition) (string, error) {
+	decls, err := declarations(s)
+	if err != nil {
+		return "", err
+	}
+	return ":root{" + decls + "}", nil
+}
+
+func declarations(s Definition) (string, error) {
 	if err := Validate(s); err != nil {
 		return "", err
 	}
-	radius := "0.5rem"
-	if s.Shape == "rounded" {
-		radius = "1.25rem"
+	c := s.Colors
+	radius := radii[s.Shape.Radius]
+	border, shadow := bubbleTreatment(s)
+	wallpaper, wallpaperSize, err := wallpaperTreatment(s)
+	if err != nil {
+		return "", err
 	}
-	spacing := "0.75rem"
-	if s.Density == "compact" {
-		spacing = "0.4rem"
+	vars := [][2]string{
+		{"bg", c.Background}, {"surface", c.Surface}, {"text", c.Text}, {"text-muted", c.TextMuted}, {"line", c.Line},
+		{"accent", c.Accent}, {"on-accent", c.OnAccent}, {"accent-text", c.AccentText},
+		{"own-bubble", c.OwnBubble}, {"on-own-bubble", c.OnOwnBubble}, {"other-bubble", c.OtherBubble}, {"on-other-bubble", c.OnOtherBubble},
+		{"badge", c.Badge}, {"on-badge", c.OnBadge}, {"danger-text", c.DangerText}, {"focus", c.Focus},
+		{"font-heading", fontStacks[s.Typography.Heading]}, {"font-body", fontStacks[s.Typography.Body]},
+		{"font-size", fmt.Sprintf("%dpx", s.Typography.BaseSize)},
+		{"radius", radius[0]}, {"bubble-radius", radius[1]}, {"bubble-border", border}, {"bubble-shadow", shadow},
+		{"wallpaper", wallpaper}, {"wallpaper-size", wallpaperSize},
+		{"spacing", densities[s.Density]}, {"motion", s.Motion},
 	}
-	return fmt.Sprintf(":root{--yp-background:%s;--yp-foreground:%s;--yp-accent:%s;--yp-radius:%s;--yp-spacing:%s;}", s.Palette.Background, s.Palette.Foreground, s.Palette.Accent, radius, spacing), nil
+	var b strings.Builder
+	for _, v := range vars {
+		b.WriteString("--yp-")
+		b.WriteString(v[0])
+		b.WriteByte(':')
+		b.WriteString(v[1])
+		b.WriteByte(';')
+	}
+	return b.String(), nil
 }
 
-// Catalog provides two visually different first-party token sets.
-// These are starter tokens, not complete accessible component skins.
-func Catalog() map[string]Definition {
-	return map[string]Definition{
-		"classic": {Version: SchemaVersion, ID: "classic", Name: "Classic", Palette: Palette{Background: "#ffffff", Foreground: "#111111", Accent: "#3355aa"}, Density: "comfortable", Shape: "square"},
-		"playful": {Version: SchemaVersion, ID: "playful", Name: "Playful", Palette: Palette{Background: "#fff7e8", Foreground: "#272044", Accent: "#7140a0"}, Density: "comfortable", Shape: "rounded"},
+func bubbleTreatment(s Definition) (border, shadow string) {
+	switch s.Shape.Bubble {
+	case "outlined":
+		return "1px solid " + s.Colors.Line, "none"
+	case "raised":
+		return "2px solid " + s.Colors.Text, "3px 3px 0 " + s.Colors.Text
+	default:
+		return "none", "none"
 	}
 }
 
-// Stylesheet emits only validated first-party skins, keyed by a fixed CSS
-// attribute selector. No user-controlled CSS or URLs are interpolated.
+func wallpaperTreatment(s Definition) (image, size string, err error) {
+	switch s.Wallpaper {
+	case "dots":
+		return "radial-gradient(" + s.Colors.Line + " 1.6px,transparent 1.8px)", "22px 22px", nil
+	case "lines":
+		r, g, b, err := parseHex(s.Colors.Accent)
+		if err != nil {
+			return "", "", err
+		}
+		tint := fmt.Sprintf("rgba(%d,%d,%d,0.06)", r, g, b)
+		return "repeating-linear-gradient(0deg," + tint + " 0," + tint + " 1px,transparent 1px,transparent 4px)", "auto", nil
+	default:
+		return "none", "auto", nil
+	}
+}
+
+// Stylesheet emits every first-party skin, keyed by a fixed attribute
+// selector and ordered by id. A trailing rule forces motion off whenever the
+// user asks the operating system for reduced motion, regardless of skin.
 func Stylesheet() (string, error) {
 	catalog := Catalog()
+	ids := make([]string, 0, len(catalog))
+	for id := range catalog {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
 	var result strings.Builder
-	result.WriteString("/* Yapuno semantic appearance tokens */\n")
-	for _, id := range []string{"classic", "playful"} {
-		s := catalog[id]
-		css, err := CSSVariables(s)
+	result.WriteString("/* Yapuno semantic appearance tokens, schema v2 */\n")
+	for _, id := range ids {
+		decls, err := declarations(catalog[id])
 		if err != nil {
 			return "", err
 		}
-		result.WriteString("[data-yp-skin=\"")
+		result.WriteString(`[data-yp-skin="`)
 		result.WriteString(id)
-		result.WriteString("\"]")
-		result.WriteString(strings.TrimPrefix(css, ":root"))
-		result.WriteByte('\n')
+		result.WriteString(`"]{`)
+		result.WriteString(decls)
+		result.WriteString("}\n")
 	}
+	result.WriteString("@media (prefers-reduced-motion:reduce){[data-yp-skin]{--yp-motion:none}}\n")
 	return result.String(), nil
 }

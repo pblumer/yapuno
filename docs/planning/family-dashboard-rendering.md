@@ -2,7 +2,7 @@
 
 This PR adds a standalone, accessible and responsive HTML renderer for the existing least-privilege `familydashboard.Build` projection.
 
-- Two first-party skins, Classic and Playful; unknown skin identifiers fall back to Classic.
+- All first-party skins from `internal/skin` (schema v2, see [skin contract](skin-contract.md)); unknown or invalid skin identifiers fall back to Classic. Component rules use semantic `--yp-*` variables only; a test rejects hard-coded colors and undeclared variables.
 - Child names are HTML-escaped and untrusted skin strings cannot be injected into attributes or CSS.
 - Touch-sized action indicators, responsive child cards, empty state and semantic headings.
 - Action indicators are **not clickable** because no authenticated management routes exist yet. This avoids misleading or unsafe actions.
