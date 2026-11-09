@@ -14,3 +14,4 @@ Yapuno follows an Atlas-inspired ADR process. An ADR states **why** a choice is 
 - [Mobile First Experience](draft-mobile-first-experience.md)
 - [Transparent content safety and retention](draft-content-safety-privacy.md)
 - [Communities & Classrooms (proposed, future)](draft-communities-classrooms.md)
+- [Semantic skin token contract (schema v2)](draft-skin-token-contract.md)

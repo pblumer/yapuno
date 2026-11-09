@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/pblumer/yapuno/internal/skin"
 )
 
 func TestDemoProfilesAreEditableOnlyWithToken(t *testing.T) {
@@ -36,5 +38,15 @@ func TestDemoProfilesAreEditableOnlyWithToken(t *testing.T) {
 	}
 	if len(state.children) != 3 {
 		t.Fatalf("expected 3 synthetic profiles, got %d", len(state.children))
+	}
+}
+
+func TestDemoOffersEveryFirstPartySkin(t *testing.T) {
+	w := httptest.NewRecorder()
+	newDemoState().handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	for id, s := range skin.Catalog() {
+		if !strings.Contains(w.Body.String(), `href="/?skin=`+id+`"`) || !strings.Contains(w.Body.String(), s.Name) {
+			t.Errorf("demo navigation misses skin %q", id)
+		}
 	}
 }
