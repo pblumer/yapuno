@@ -44,7 +44,7 @@ Status labels ("sending", "sent", "not sent"), contact-approval and consent UI, 
 - Negative / accepted trade-offs: radically different *layouts* (e.g. bottom vs. side navigation) are not yet expressible; vocabularies must be extended by code review, which slows community theming; WCAG 2.x contrast is a minimum, not proof of readability (APCA and real-user testing may disagree).
 - Open questions and review gates:
   - **Fonts:** font families are named in stacks but not shipped. They must be self-hosted (no Google Fonts requests) with verified licenses before use; until then system fonts render.
-  - **Preferences:** per-identity persistence (child and guardian separately), sync across devices and guardian age-appropriate restrictions are not implemented.
+  - **Preferences:** per-subject persistence (guardian or child, per tenant) and a guardian "Mein Look" picker exist as an engineering preview ([Mein Look](../planning/mein-look.md)); child access, guardian age-appropriate restrictions and deletion/retention are not implemented.
   - **Layout slots:** define an enumerated set of component variants before any theme needs a different layout.
   - **High-contrast mode** and dynamic type beyond 20 px base size need their own rules.
   - **Localization:** display names are English defaults; localized labels (e.g. "Bunt", "Nacht", "Wolke") belong to UI localization, not the manifest.

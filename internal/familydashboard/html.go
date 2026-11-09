@@ -7,12 +7,26 @@ import (
 	"github.com/pblumer/yapuno/internal/skin"
 )
 
+// Options adjusts the dashboard header. Avatar MUST be trusted markup produced
+// by appearance.FigureSVG; it is inserted without escaping. ProfileHref is
+// escaped by html/template and links the figure to the "Mein Look" page.
+type Options struct {
+	Skin        string
+	Avatar      template.HTML
+	ProfileHref string
+}
+
 // RenderHTML returns an accessible, mobile-first guardian dashboard fragment.
 // The caller MUST authenticate the guardian and use Build to filter cards.
 // This function is a renderer, not an authorization boundary or HTTP endpoint.
 func RenderHTML(cards []ChildCard, skinID string) (string, error) {
+	return RenderHTMLWithOptions(cards, Options{Skin: skinID})
+}
+
+// RenderHTMLWithOptions is RenderHTML with an optional profile figure.
+func RenderHTMLWithOptions(cards []ChildCard, opts Options) (string, error) {
 	catalog := skin.Catalog()
-	selected := skin.Resolve(skinID, catalog, catalog["classic"])
+	selected := skin.Resolve(opts.Skin, catalog, catalog["classic"])
 	css, err := skin.CSSVariables(selected)
 	if err != nil {
 		return "", err
@@ -25,6 +39,8 @@ func RenderHTML(cards []ChildCard, skinID string) (string, error) {
 .yp-family .yp-top{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding-bottom:1.5rem}
 .yp-family .yp-logo{font-family:var(--yp-font-heading);font-weight:850;font-size:1.45rem;letter-spacing:-.06em}
 .yp-family .yp-logo span{color:var(--yp-accent-text)}
+.yp-family .yp-profile{display:grid;place-items:center;width:48px;height:48px;border-radius:50%;color:var(--yp-text)}
+.yp-family .yp-profile:focus-visible{outline:3px solid var(--yp-focus);outline-offset:2px}
 .yp-family .yp-avatar{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:var(--yp-accent);color:var(--yp-on-accent);font-weight:800}
 .yp-family .yp-kicker{text-transform:uppercase;letter-spacing:.14em;font-size:.7rem;font-weight:800;color:var(--yp-accent-text)}
 .yp-family h1{font-family:var(--yp-font-heading);font-size:clamp(1.8rem,5vw,3rem);letter-spacing:-.055em;line-height:1.1;margin:.4rem 0}
@@ -49,7 +65,7 @@ func RenderHTML(cards []ChildCard, skinID string) (string, error) {
 @media(prefers-reduced-motion:no-preference){.yp-family .yp-card{transition:transform .2s ease}.yp-family .yp-card:hover{transform:translateY(-3px)}}
 </style>
 <div class="yp-shell">
-<header class="yp-top"><div class="yp-logo">ya<span>puno</span><span aria-hidden="true"> ●</span></div><div class="yp-avatar" aria-label="Demo guardian">G</div></header>
+<header class="yp-top"><div class="yp-logo">ya<span>puno</span><span aria-hidden="true"> ●</span></div>{{if .Avatar}}{{if .ProfileHref}}<a class="yp-profile" href="{{.ProfileHref}}" aria-label="Mein Look">{{.Avatar}}</a>{{else}}<span class="yp-profile">{{.Avatar}}</span>{{end}}{{else}}<div class="yp-avatar" aria-label="Demo guardian">G</div>{{end}}</header>
 <main>
 <p class="yp-kicker">Family space</p>
 <h1 id="yp-family-title">Your family, your rules.</h1>
@@ -68,10 +84,12 @@ func RenderHTML(cards []ChildCard, skinID string) (string, error) {
 	}
 	var buf bytes.Buffer
 	err = tmpl.Execute(&buf, struct {
-		Skin  string
-		CSS   template.CSS
-		Cards []ChildCard
-	}{Skin: selected.ID, CSS: template.CSS(css), Cards: cards})
+		Skin        string
+		CSS         template.CSS
+		Cards       []ChildCard
+		Avatar      template.HTML
+		ProfileHref string
+	}{Skin: selected.ID, CSS: template.CSS(css), Cards: cards, Avatar: opts.Avatar, ProfileHref: opts.ProfileHref})
 	if err != nil {
 		return "", err
 	}

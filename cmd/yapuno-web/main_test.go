@@ -47,7 +47,7 @@ func TestBrowserLoginAndFamilyWithLiveRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	mailer := &fakeMailer{}
-	handler, err := newHandler("https://app.example.org", store, dir, mailer, sessions)
+	handler, err := newHandler("https://app.example.org", store, dir, mailer, sessions, optionalStores{})
 	if err != nil {
 		t.Fatal(err)
 	}
