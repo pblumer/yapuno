@@ -13,6 +13,7 @@ The first goal is a simple conversation between two children on approved devices
 - [Vision](docs/product/vision.md)
 - [Mobile First Experience (MFE) specification](docs/product/mobile-first-experience.md)
 - [Roadmap](ROADMAP.md) · [GitHub issues](https://github.com/pblumer/yapuno/issues)
+- [Communities & Classrooms (future proposal)](docs/planning/communities-classrooms.md) · [tracking issue #36](https://github.com/pblumer/yapuno/issues/36)
 - [Architecture](docs/ARCHITECTURE.md) · [ADR drafts](docs/adr/README.md)
 - [Agent development rules / mandatory TDD](AGENTS.md) · [Contribution guide](CONTRIBUTING.md)
 - [Responsible security reporting](SECURITY.md)

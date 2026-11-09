@@ -23,6 +23,12 @@ Status: **initial design**, not production-ready. GitHub issues are the delivery
 - [ ] [#8](https://github.com/pblumer/yapuno/issues/8): independently assessed security, child-privacy legal review, guardian/child understanding, real-device accessibility and push behavior; operational recovery tests
 
 ## Future options, not commitments
-Group chats/tenants for clubs and schools, stickers, voice snippets, moderated media, age-adaptive themes. No advertising, public profiles or engagement feeds.
+[Communities & Classrooms (#36)](https://github.com/pblumer/yapuno/issues/36) is a **proposed future capability, not part of First Hello**. Design: [capability plan](docs/planning/communities-classrooms.md), [ADR proposal](docs/adr/draft-communities-classrooms.md).
+
+- **CC0 — foundation**: define community/cohort/room entity model, independent membership vs. direct-contact authorization, role grants, privacy and threat review; ADR approval required before implementation.
+- **CC1 — private class communities**: guardian-organized opt-in class rooms with separately approved children, announcements and guardian spaces; no school verification claim.
+- **CC2 — official schools**: verified school/staff roles, institutional governance and legal/privacy gates; explicitly later than CC1.
+
+Dependencies: #2–#5, #7 and #8; no real child pilot before the independent safety gate. Other future options: stickers, voice snippets, moderated media, age-adaptive themes. No advertising, public profiles or engagement feeds.
 
 **No actual child users until the pilot-readiness gate passes.**

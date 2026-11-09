@@ -42,3 +42,8 @@ Encryption in transit and at rest are required for any real pilot; a server that
 
 ## Status and decisions
 Draft ADRs cover Go/dependency choices, guardian trust boundaries, MFE and safety/retention. Data store, E2EE, login guarantees and legal scope are intentionally not settled yet. No service endpoints, frontend or message persistence exist yet.
+
+## Future capability proposal: Communities & Classrooms (not implemented)
+An optional `Community > Cohort (e.g. class/year) > Room` boundary may serve parent-led class groups and eventually verified school organizations. The principal remains in its authoritative home family/tenant; narrowly scoped cross-family **community membership** must not weaken that boundary or automatically create personal contacts. Parent authority, membership, room role, device and direct-contact grant are independent checks. Official school staff and school operator roles will require independent verification, privacy/legal review and explicit delegation.
+
+See the [proposed classroom ADR](adr/draft-communities-classrooms.md), [capability plan](planning/communities-classrooms.md) and [issue #36](https://github.com/pblumer/yapuno/issues/36). **No organization, class, group messaging, school verification or cross-family community runtime is implemented by this proposal.**
