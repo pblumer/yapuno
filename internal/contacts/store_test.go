@@ -686,3 +686,35 @@ func TestRevokedGuardianLosesAllContactOperations(t *testing.T) {
 		t.Fatalf("equal guardian blocked: %v", err)
 	}
 }
+
+// ContactsOf serves an authenticated child session: only active contacts of
+// exactly that child, by display name.
+func TestContactsOfListsOnlyActiveContactsOfThatChild(t *testing.T) {
+	f := setup(t)
+	f.connect(t) // lea <-> mia, active
+	code, err := f.store.Invite("anna", lea.TenantID, lea.ChildID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.Redeem("carla", noah.TenantID, noah.ChildID, code); err != nil {
+		t.Fatal(err) // lea <-> noah, pending only
+	}
+	names := func(p Party) []string {
+		var out []string
+		for _, e := range f.store.ContactsOf(p) {
+			out = append(out, e.Name)
+		}
+		return out
+	}
+	if got := names(lea); len(got) != 1 || got[0] != "Mia" {
+		t.Fatalf("lea: %v", got)
+	}
+	if got := names(mia); len(got) != 1 || got[0] != "Lea" {
+		t.Fatalf("mia: %v", got)
+	}
+	for _, p := range []Party{tim, noah, {}, {TenantID: "family-b", ChildID: "lea"}, {TenantID: "family-a"}} {
+		if got := names(p); len(got) != 0 {
+			t.Fatalf("%+v sees %v", p, got)
+		}
+	}
+}

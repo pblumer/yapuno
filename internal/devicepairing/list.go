@@ -17,3 +17,20 @@ func (s *Store) ListDevices(guardian, tenant, child string) ([]Device, error) {
 	}
 	return out, nil
 }
+
+// DeviceByID returns an active (not revoked) device by its random id. It is
+// only a key lookup for proof-of-possession login: the caller must verify a
+// fresh signature against the returned public key before trusting anything.
+func (s *Store) DeviceByID(deviceID string) (Device, bool) {
+	if deviceID == "" {
+		return Device{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, d := range s.state.Devices {
+		if d.ID == deviceID && !d.Revoked {
+			return d, true
+		}
+	}
+	return Device{}, false
+}

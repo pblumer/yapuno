@@ -16,3 +16,4 @@ Yapuno follows an Atlas-inspired ADR process. An ADR states **why** a choice is 
 - [Communities & Classrooms (proposed, future)](draft-communities-classrooms.md)
 - [Semantic skin token contract (schema v2)](draft-skin-token-contract.md)
 - [Cross-family contacts through one-time guardian invitations](draft-contact-invitations.md)
+- [Child device sessions through proof of possession of the paired key](draft-child-device-sessions.md)
