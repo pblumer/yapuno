@@ -36,17 +36,29 @@ func New(cfg Config) (*Sender, error) {
 }
 
 func (s *Sender) SendSignInLink(ctx context.Context, email, link string) error {
+	// Never interpolate an untrusted address into a URL; the login service
+	// generates the canonical link and we require HTTPS without CR/LF.
+	if !strings.HasPrefix(link, "https://") || strings.ContainsAny(link, "\r\n\x00") {
+		return errors.New("invalid sign-in URL")
+	}
+	// ASCII only, so no RFC 2047 encoding is needed. Never print links to logs.
+	message := "From: " + s.cfg.From + "\r\nTo: " + email + "\r\nSubject: Yapuno sign-in link\r\n" +
+		"MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n" +
+		"Content-Transfer-Encoding: 7bit\r\n\r\n" +
+		"Your one-time Yapuno sign-in link (valid for 10 minutes):\r\n" + link + "\r\n\r\n" +
+		"If you did not request this, ignore this message.\r\n"
+	return s.deliver(ctx, email, message)
+}
+
+// deliver validates the recipient and sends one prepared message. The
+// message must already be wire-safe (CRLF line ends, 7-bit).
+func (s *Sender) deliver(ctx context.Context, email, message string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	recipient, err := mail.ParseAddress(email)
 	if err != nil || recipient.Name != "" || recipient.Address != email || strings.ContainsAny(email, "\r\n\x00") {
 		return errors.New("invalid recipient")
-	}
-	// Never interpolate an untrusted address into a URL; the login service
-	// generates the canonical link and we require HTTPS without CR/LF.
-	if !strings.HasPrefix(link, "https://") || strings.ContainsAny(link, "\r\n\x00") {
-		return errors.New("invalid sign-in URL")
 	}
 	address := net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.Port))
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
@@ -59,7 +71,11 @@ func (s *Sender) SendSignInLink(ctx context.Context, email, link string) error {
 	if err := conn.HandshakeContext(ctx); err != nil {
 		return fmt.Errorf("smtp TLS handshake failed: %w", err)
 	}
-	if err := conn.SetDeadline(time.Now().Add(20 * time.Second)); err != nil {
+	deadline := time.Now().Add(20 * time.Second)
+	if limit, ok := ctx.Deadline(); ok && limit.Before(deadline) {
+		deadline = limit
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
 		return err
 	}
 	client, err := smtp.NewClient(conn, s.cfg.Host)
@@ -80,12 +96,6 @@ func (s *Sender) SendSignInLink(ctx context.Context, email, link string) error {
 	if err != nil {
 		return fmt.Errorf("smtp message failed: %w", err)
 	}
-	// ASCII only, so no RFC 2047 encoding is needed. Never print links to logs.
-	message := "From: " + s.cfg.From + "\r\nTo: " + email + "\r\nSubject: Yapuno sign-in link\r\n" +
-		"MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n" +
-		"Content-Transfer-Encoding: 7bit\r\n\r\n" +
-		"Your one-time Yapuno sign-in link (valid for 10 minutes):\r\n" + link + "\r\n\r\n" +
-		"If you did not request this, ignore this message.\r\n"
 	if _, err := io.WriteString(body, message); err != nil {
 		_ = body.Close()
 		return fmt.Errorf("smtp write failed: %w", err)

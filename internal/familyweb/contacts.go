@@ -60,9 +60,23 @@ func authenticated(auth Authenticator, w http.ResponseWriter, r *http.Request) (
 	return p, true
 }
 
-// postedForm enforces form encoding, a small body, exactly one value for each
-// expected field, the session-bound CSRF token and a well-formed child id.
+// postedForm is postedFields for requests about one child: it additionally
+// requires a well-formed child id.
 func postedForm(w http.ResponseWriter, r *http.Request, p Session, fields ...string) (url.Values, bool) {
+	form, ok := postedFields(w, r, p, fields...)
+	if !ok {
+		return nil, false
+	}
+	if !validChildID(form.Get("child_id")) {
+		http.Error(w, "Invalid child", http.StatusBadRequest)
+		return nil, false
+	}
+	return form, true
+}
+
+// postedFields enforces form encoding, a small body, exactly one value for
+// each expected field and the session-bound CSRF token.
+func postedFields(w http.ResponseWriter, r *http.Request, p Session, fields ...string) (url.Values, bool) {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/x-www-form-urlencoded" {
 		http.Error(w, "Expected form data", http.StatusUnsupportedMediaType)
@@ -82,10 +96,6 @@ func postedForm(w http.ResponseWriter, r *http.Request, p Session, fields ...str
 	token := r.PostForm.Get("csrf_token")
 	if len(token) != len(p.CSRFToken) || subtle.ConstantTimeCompare([]byte(token), []byte(p.CSRFToken)) != 1 {
 		http.Error(w, "Invalid CSRF token", http.StatusForbidden)
-		return nil, false
-	}
-	if !validChildID(r.PostForm.Get("child_id")) {
-		http.Error(w, "Invalid child", http.StatusBadRequest)
 		return nil, false
 	}
 	return r.PostForm, true

@@ -95,9 +95,22 @@ func secureHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 }
 
+// loginNotices are the only texts the login page can be asked to show.
+var loginNotices = map[string]string{
+	"signed-out":            "Du bist abgemeldet.",
+	"signed-out-everywhere": "Du bist überall abgemeldet. Noch nicht benutzte Anmeldelinks sind ungültig.",
+}
+
+var loginForm = template.Must(template.New("login").Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno – Anmeldung</title></head><body><main>{{if .}}<p role="status"><strong>{{.}}</strong></p>{{end}}<h1>Bei Yapuno anmelden</h1><p>Für bereits bestätigte Erziehungsberechtigte. Du erhältst einen einmaligen Anmeldelink.</p><form method="post" action="/login/request"><label>E-Mail-Adresse<input type="email" name="email" autocomplete="email" required maxlength="254"></label><button type="submit">Anmeldelink senden</button></form></main></body></html>`))
+
 func (h *Handler) showForm(w http.ResponseWriter, r *http.Request) {
 	secureHeaders(w)
-	_, _ = w.Write([]byte(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno – Anmeldung</title></head><body><main><h1>Bei Yapuno anmelden</h1><p>Für bereits bestätigte Erziehungsberechtigte. Du erhältst einen einmaligen Anmeldelink.</p><form method="post" action="/login/request"><label>E-Mail-Adresse<input type="email" name="email" autocomplete="email" required maxlength="254"></label><button type="submit">Anmeldelink senden</button></form></main></body></html>`))
+	notice := ""
+	// Only a single, known key selects a text; the query is never rendered.
+	if values := r.URL.Query()["notice"]; len(values) == 1 {
+		notice = loginNotices[values[0]]
+	}
+	_ = loginForm.Execute(w, notice)
 }
 
 func normalizeEmail(raw string) (string, bool) {
@@ -228,4 +241,24 @@ func (h *Handler) consumeLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/family", http.StatusSeeOther)
+}
+
+// Cancel invalidates every unused sign-in link of one guardian and returns
+// how many were pending. It belongs to "sign out everywhere": a link already
+// sitting in a mailbox must not outlive that decision. It does not prevent a
+// new link from being requested.
+func (h *Handler) Cancel(guardianID, tenantID string) int {
+	if guardianID == "" || tenantID == "" {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	cancelled := 0
+	for digest, item := range h.pending {
+		if item.guardianID == guardianID && item.tenantID == tenantID {
+			delete(h.pending, digest)
+			cancelled++
+		}
+	}
+	return cancelled
 }

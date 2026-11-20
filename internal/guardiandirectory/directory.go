@@ -39,6 +39,35 @@ type FamilyReader interface {
 type Directory struct {
 	path     string
 	families FamilyReader
+	locks    LockReader
+}
+
+// LockReader reports emergency locks of guardian access. A locked guardian
+// can neither sign in nor keep an existing session until the lock is lifted.
+type LockReader interface {
+	Locked(guardianID, tenantID string) bool
+}
+
+// NewWithLocks is New with an emergency-lock check on every lookup.
+func NewWithLocks(path string, families FamilyReader, locks LockReader) (*Directory, error) {
+	d, err := New(path, families)
+	if err != nil {
+		return nil, err
+	}
+	return d.WithLocks(locks)
+}
+
+// WithLocks returns a directory over the same file that additionally denies
+// locked guardians. The receiver is left unchanged.
+func (d *Directory) WithLocks(locks LockReader) (*Directory, error) {
+	if locks == nil {
+		return nil, ErrUnavailable
+	}
+	return &Directory{path: d.path, families: d.families, locks: locks}, nil
+}
+
+func (d *Directory) locked(guardianID, tenantID string) bool {
+	return d.locks != nil && d.locks.Locked(guardianID, tenantID)
 }
 
 func New(path string, families FamilyReader) (*Directory, error) {
@@ -125,7 +154,7 @@ func (d *Directory) LookupGuardian(ctx context.Context, email string) (guardianl
 		return guardianlogin.Principal{}, err
 	}
 	for _, e := range entries {
-		if e.Email == normalized && e.Active && len(d.families.Cards(e.GuardianID, e.TenantID)) > 0 {
+		if e.Email == normalized && e.Active && !d.locked(e.GuardianID, e.TenantID) && len(d.families.Cards(e.GuardianID, e.TenantID)) > 0 {
 			return guardianlogin.Principal{Email: e.Email, GuardianID: e.GuardianID, TenantID: e.TenantID, Active: true}, nil
 		}
 	}
@@ -144,8 +173,30 @@ func (d *Directory) ActiveGuardian(ctx context.Context, guardianID, tenantID str
 	}
 	for _, e := range entries {
 		if e.Active && e.GuardianID == guardianID && e.TenantID == tenantID {
-			return len(d.families.Cards(guardianID, tenantID)) > 0
+			return !d.locked(guardianID, tenantID) && len(d.families.Cards(guardianID, tenantID)) > 0
 		}
 	}
 	return false
+}
+
+// Email returns the verified address of an active, unlocked guardian who
+// still has a child grant. It exists to send security notices; never show
+// the address to another guardian.
+func (d *Directory) Email(ctx context.Context, guardianID, tenantID string) (string, bool) {
+	if ctx.Err() != nil || guardianID == "" || tenantID == "" {
+		return "", false
+	}
+	entries, err := d.read()
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		if e.Active && e.GuardianID == guardianID && e.TenantID == tenantID {
+			if d.locked(guardianID, tenantID) || len(d.families.Cards(guardianID, tenantID)) == 0 {
+				return "", false
+			}
+			return e.Email, true
+		}
+	}
+	return "", false
 }

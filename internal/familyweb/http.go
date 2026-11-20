@@ -54,6 +54,8 @@ type Options struct {
 	Looks        AppearanceStore // nil: classic skin, no "Mein Look" link
 	DevicePages  bool
 	ContactPages bool
+	// SecurityPages links to sign-out and the emergency lock (NewSecurityPages).
+	SecurityPages bool
 }
 
 // NewWithOptions builds the fail-closed family overview handler.
@@ -61,7 +63,7 @@ func NewWithOptions(auth Authenticator, store FamilyStore, opt Options) (http.Ha
 	if auth == nil || store == nil {
 		return nil, errors.New("authenticator and store are required")
 	}
-	h := &handler{auth: auth, store: store, looks: opt.Looks, devicesEnabled: opt.DevicePages, contactsEnabled: opt.ContactPages}
+	h := &handler{auth: auth, store: store, looks: opt.Looks, devicesEnabled: opt.DevicePages, contactsEnabled: opt.ContactPages, securityEnabled: opt.SecurityPages}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /family", h.view)
 	mux.HandleFunc("POST /family/rename", h.rename)
@@ -75,6 +77,7 @@ type handler struct {
 
 	devicesEnabled  bool
 	contactsEnabled bool
+	securityEnabled bool
 }
 
 func (h *handler) session(w http.ResponseWriter, r *http.Request) (Session, bool) {
@@ -117,7 +120,7 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unable to display family", http.StatusInternalServerError)
 		return
 	}
-	const page = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno – Familie</title></head><body>{{.Fragment}}{{if .LookEnabled}}<p><a href="/family/look">Mein Look ändern</a></p>{{end}}<section aria-label="Kinderprofile bearbeiten"><h2>Profile bearbeiten</h2>{{range .Cards}}{{if and .Permissions.ManageDevices .Permissions.ApproveContacts}}<form method="post" action="/family/rename"><label>Neuer Name für {{.DisplayName}}<input name="name" value="{{.DisplayName}}" required maxlength="40"></label><input type="hidden" name="child_id" value="{{.ID}}"><input type="hidden" name="csrf_token" value="{{$.Token}}"><button type="submit">Speichern</button></form>{{end}}{{if and $.DevicesEnabled .Permissions.ManageDevices}}<p><a href="/family/devices?child_id={{.ID}}">Geräte verwalten</a></p><p><a href="/family/devices/lost?child_id={{.ID}}">Gerät von {{.DisplayName}} verloren?</a></p>{{end}}{{if and $.ContactsEnabled .Permissions.ApproveContacts}}<p><a href="/family/contacts?child_id={{.ID}}">Kontakte von {{.DisplayName}} verwalten</a></p>{{end}}{{end}}</section></body></html>`
+	const page = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno – Familie</title></head><body>{{.Fragment}}{{if .LookEnabled}}<p><a href="/family/look">Mein Look ändern</a></p>{{end}}{{if .SecurityEnabled}}<p><a href="/family/security">Sicherheit und Abmelden</a></p>{{end}}<section aria-label="Kinderprofile bearbeiten"><h2>Profile bearbeiten</h2>{{range .Cards}}{{if and .Permissions.ManageDevices .Permissions.ApproveContacts}}<form method="post" action="/family/rename"><label>Neuer Name für {{.DisplayName}}<input name="name" value="{{.DisplayName}}" required maxlength="40"></label><input type="hidden" name="child_id" value="{{.ID}}"><input type="hidden" name="csrf_token" value="{{$.Token}}"><button type="submit">Speichern</button></form>{{end}}{{if and $.DevicesEnabled .Permissions.ManageDevices}}<p><a href="/family/devices?child_id={{.ID}}">Geräte verwalten</a></p><p><a href="/family/devices/lost?child_id={{.ID}}">Gerät von {{.DisplayName}} verloren?</a></p>{{end}}{{if and $.ContactsEnabled .Permissions.ApproveContacts}}<p><a href="/family/contacts?child_id={{.ID}}">Kontakte von {{.DisplayName}} verwalten</a></p>{{end}}{{end}}</section></body></html>`
 	t, err := template.New("page").Parse(page)
 	if err != nil {
 		http.Error(w, "Unable to display family", http.StatusInternalServerError)
@@ -132,7 +135,8 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 		DevicesEnabled  bool
 		ContactsEnabled bool
 		LookEnabled     bool
-	}{Token: p.CSRFToken, Cards: cards, Fragment: template.HTML(fragment), DevicesEnabled: h.devicesEnabled, ContactsEnabled: h.contactsEnabled, LookEnabled: h.looks != nil}); err != nil {
+		SecurityEnabled bool
+	}{Token: p.CSRFToken, Cards: cards, Fragment: template.HTML(fragment), DevicesEnabled: h.devicesEnabled, ContactsEnabled: h.contactsEnabled, LookEnabled: h.looks != nil, SecurityEnabled: h.securityEnabled}); err != nil {
 		return
 	}
 }

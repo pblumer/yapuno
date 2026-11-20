@@ -18,3 +18,4 @@ Yapuno follows an Atlas-inspired ADR process. An ADR states **why** a choice is 
 - [Cross-family contacts through one-time guardian invitations](draft-contact-invitations.md)
 - [Child device sessions through proof of possession of the paired key](draft-child-device-sessions.md)
 - [Durable, idempotent one-to-one messages with per-request authorization](draft-message-storage.md)
+- [Emergency lock of a guardian's own access](draft-guardian-access-lock.md)

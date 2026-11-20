@@ -25,6 +25,7 @@ import (
 	"github.com/pblumer/yapuno/internal/familyweb"
 	"github.com/pblumer/yapuno/internal/fontassets"
 	"github.com/pblumer/yapuno/internal/guardiandirectory"
+	"github.com/pblumer/yapuno/internal/guardianlock"
 	"github.com/pblumer/yapuno/internal/guardianlogin"
 	"github.com/pblumer/yapuno/internal/guardianmailer"
 	"github.com/pblumer/yapuno/internal/guardiansession"
@@ -56,6 +57,8 @@ type optionalStores struct {
 	appearance *appearance.Store
 	contacts   *contacts.Store
 	messages   *messages.Store
+	// guardianLocks enables the emergency lock of a guardian's own access.
+	guardianLocks *guardianlock.Store
 }
 
 // purgingContacts deletes the messages of a contact from disk as soon as a
@@ -83,12 +86,28 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 	if opt.messages != nil && (opt.contacts == nil || opt.pairing == nil) {
 		return nil, errors.New("messaging requires the contact and pairing stores")
 	}
+	var locker *guardianlock.Locker
+	if opt.guardianLocks != nil {
+		// From here on every sign-in and every request also checks the lock.
+		lockAware, err := directory.WithLocks(opt.guardianLocks)
+		if err != nil {
+			return nil, err
+		}
+		directory = lockAware
+		notifier, ok := sender.(guardianlock.Notifier)
+		if !ok {
+			return nil, errors.New("guardian locks require a mailer that can send lock notices")
+		}
+		if locker, err = guardianlock.NewLocker(opt.guardianLocks, store, directory, notifier); err != nil {
+			return nil, err
+		}
+	}
 	login, err := guardianlogin.New(guardianlogin.Config{Origin: origin, Directory: directory, Sender: sender, Sessions: sessions, Now: time.Now})
 	if err != nil {
 		return nil, err
 	}
 	auth := verifiedSessions{sessions: sessions, directory: directory}
-	familyOptions := familyweb.Options{DevicePages: opt.pairing != nil, ContactPages: opt.contacts != nil}
+	familyOptions := familyweb.Options{DevicePages: opt.pairing != nil, ContactPages: opt.contacts != nil, SecurityPages: true}
 	// Assign only a non-nil store: a typed nil pointer would be a non-nil interface.
 	var looks familyweb.AppearanceStore
 	if opt.appearance != nil {
@@ -111,6 +130,20 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 	mux.Handle("/login/", loginRoutes)
 	mux.Handle("/family", familyRoutes)
 	mux.Handle("/family/", familyRoutes)
+	// Sign-out is always available; the emergency lock needs its store.
+	securityOptions := familyweb.SecurityOptions{Looks: looks}
+	if locker != nil {
+		securityOptions.Locker = locker
+		if opt.pairing != nil {
+			securityOptions.Devices = opt.pairing
+		}
+	}
+	securityRoutes, err := familyweb.NewSecurityPages(auth, sessions, login, store, securityOptions)
+	if err != nil {
+		return nil, err
+	}
+	mux.Handle("/family/security", securityRoutes)
+	mux.Handle("/family/security/", securityRoutes)
 	if opt.appearance != nil {
 		lookRoutes, err := familyweb.NewLookPages(auth, opt.appearance)
 		if err != nil {
@@ -190,6 +223,7 @@ func main() {
 	pairingPath := flag.String("pairing", os.Getenv("YAPUNO_PAIRING_FILE"), "optional private device pairing file")
 	contactsPath := flag.String("contacts", os.Getenv("YAPUNO_CONTACTS_FILE"), "optional private file for guardian-approved contacts")
 	messagesPath := flag.String("messages", os.Getenv("YAPUNO_MESSAGES_FILE"), "optional private message log; requires pairing and contacts")
+	guardianLocksPath := flag.String("guardian-locks", os.Getenv("YAPUNO_GUARDIAN_LOCKS_FILE"), "optional private file for emergency locks of guardian access")
 	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
 	flag.Parse()
 	host, _, err := net.SplitHostPort(*listen)
@@ -239,6 +273,13 @@ func main() {
 		}
 		defer messageStore.Close()
 	}
+	var guardianLocks *guardianlock.Store
+	if *guardianLocksPath != "" {
+		guardianLocks, err = guardianlock.Open(*guardianLocksPath, time.Now)
+		if err != nil {
+			log.Fatal("guardian lock store unavailable or insecure")
+		}
+	}
 	smtpPort := 465
 	sender, err := guardianmailer.New(guardianmailer.Config{
 		Host: os.Getenv("YAPUNO_SMTP_HOST"), Port: smtpPort,
@@ -252,7 +293,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	handler, err := newHandler(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore})
+	handler, err := newHandler(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}
