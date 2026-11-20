@@ -1,10 +1,8 @@
 package familyweb
 
 import (
-	"crypto/subtle"
 	"errors"
 	"html/template"
-	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -66,32 +64,7 @@ func validChildID(id string) bool {
 }
 
 func (h *deviceHandler) posted(w http.ResponseWriter, r *http.Request, p Session, fields ...string) (url.Values, bool) {
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/x-www-form-urlencoded" {
-		http.Error(w, "Expected form data", http.StatusUnsupportedMediaType)
-		return nil, false
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Invalid form", http.StatusBadRequest)
-		return nil, false
-	}
-	for _, field := range append([]string{"csrf_token"}, fields...) {
-		if len(r.PostForm[field]) != 1 {
-			http.Error(w, "Invalid form", http.StatusBadRequest)
-			return nil, false
-		}
-	}
-	token := r.PostForm.Get("csrf_token")
-	if len(token) != len(p.CSRFToken) || subtle.ConstantTimeCompare([]byte(token), []byte(p.CSRFToken)) != 1 {
-		http.Error(w, "Invalid CSRF token", http.StatusForbidden)
-		return nil, false
-	}
-	if !validChildID(r.PostForm.Get("child_id")) {
-		http.Error(w, "Invalid child", http.StatusBadRequest)
-		return nil, false
-	}
-	return r.PostForm, true
+	return postedForm(w, r, p, fields...)
 }
 
 func respondDeviceError(w http.ResponseWriter, err error) {

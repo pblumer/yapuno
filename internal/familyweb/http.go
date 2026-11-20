@@ -36,7 +36,7 @@ type FamilyStore interface {
 // New builds a fail-closed handler. It is not a complete application: a real
 // authenticator, secure cookies, HTTPS and account provisioning are required.
 func New(auth Authenticator, store FamilyStore, enableDevicePages ...bool) (http.Handler, error) {
-	return newFamily(auth, store, nil, len(enableDevicePages) != 0 && enableDevicePages[0])
+	return NewWithOptions(auth, store, Options{DevicePages: len(enableDevicePages) != 0 && enableDevicePages[0]})
 }
 
 // NewWithAppearance additionally applies the guardian's saved look and links
@@ -45,14 +45,23 @@ func NewWithAppearance(auth Authenticator, store FamilyStore, looks AppearanceSt
 	if looks == nil {
 		return nil, errors.New("appearance store is required")
 	}
-	return newFamily(auth, store, looks, enableDevicePages)
+	return NewWithOptions(auth, store, Options{Looks: looks, DevicePages: enableDevicePages})
 }
 
-func newFamily(auth Authenticator, store FamilyStore, looks AppearanceStore, devices bool) (http.Handler, error) {
+// Options selects which optional pages the family overview links to. A link
+// is navigation only; each linked handler authorizes its own requests.
+type Options struct {
+	Looks        AppearanceStore // nil: classic skin, no "Mein Look" link
+	DevicePages  bool
+	ContactPages bool
+}
+
+// NewWithOptions builds the fail-closed family overview handler.
+func NewWithOptions(auth Authenticator, store FamilyStore, opt Options) (http.Handler, error) {
 	if auth == nil || store == nil {
 		return nil, errors.New("authenticator and store are required")
 	}
-	h := &handler{auth: auth, store: store, looks: looks, devicesEnabled: devices}
+	h := &handler{auth: auth, store: store, looks: opt.Looks, devicesEnabled: opt.DevicePages, contactsEnabled: opt.ContactPages}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /family", h.view)
 	mux.HandleFunc("POST /family/rename", h.rename)
@@ -64,7 +73,8 @@ type handler struct {
 	store FamilyStore
 	looks AppearanceStore
 
-	devicesEnabled bool
+	devicesEnabled  bool
+	contactsEnabled bool
 }
 
 func (h *handler) session(w http.ResponseWriter, r *http.Request) (Session, bool) {
@@ -107,7 +117,7 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unable to display family", http.StatusInternalServerError)
 		return
 	}
-	const page = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno – Familie</title></head><body>{{.Fragment}}{{if .LookEnabled}}<p><a href="/family/look">Mein Look ändern</a></p>{{end}}<section aria-label="Kinderprofile bearbeiten"><h2>Profile bearbeiten</h2>{{range .Cards}}{{if and .Permissions.ManageDevices .Permissions.ApproveContacts}}<form method="post" action="/family/rename"><label>Neuer Name für {{.DisplayName}}<input name="name" value="{{.DisplayName}}" required maxlength="40"></label><input type="hidden" name="child_id" value="{{.ID}}"><input type="hidden" name="csrf_token" value="{{$.Token}}"><button type="submit">Speichern</button></form>{{end}}{{if and $.DevicesEnabled .Permissions.ManageDevices}}<p><a href="/family/devices?child_id={{.ID}}">Geräte verwalten</a></p>{{end}}{{end}}</section></body></html>`
+	const page = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno – Familie</title></head><body>{{.Fragment}}{{if .LookEnabled}}<p><a href="/family/look">Mein Look ändern</a></p>{{end}}<section aria-label="Kinderprofile bearbeiten"><h2>Profile bearbeiten</h2>{{range .Cards}}{{if and .Permissions.ManageDevices .Permissions.ApproveContacts}}<form method="post" action="/family/rename"><label>Neuer Name für {{.DisplayName}}<input name="name" value="{{.DisplayName}}" required maxlength="40"></label><input type="hidden" name="child_id" value="{{.ID}}"><input type="hidden" name="csrf_token" value="{{$.Token}}"><button type="submit">Speichern</button></form>{{end}}{{if and $.DevicesEnabled .Permissions.ManageDevices}}<p><a href="/family/devices?child_id={{.ID}}">Geräte verwalten</a></p>{{end}}{{if and $.ContactsEnabled .Permissions.ApproveContacts}}<p><a href="/family/contacts?child_id={{.ID}}">Kontakte von {{.DisplayName}} verwalten</a></p>{{end}}{{end}}</section></body></html>`
 	t, err := template.New("page").Parse(page)
 	if err != nil {
 		http.Error(w, "Unable to display family", http.StatusInternalServerError)
@@ -119,9 +129,10 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 		Cards    []familydashboard.ChildCard
 		Fragment template.HTML
 
-		DevicesEnabled bool
-		LookEnabled    bool
-	}{Token: p.CSRFToken, Cards: cards, Fragment: template.HTML(fragment), DevicesEnabled: h.devicesEnabled, LookEnabled: h.looks != nil}); err != nil {
+		DevicesEnabled  bool
+		ContactsEnabled bool
+		LookEnabled     bool
+	}{Token: p.CSRFToken, Cards: cards, Fragment: template.HTML(fragment), DevicesEnabled: h.devicesEnabled, ContactsEnabled: h.contactsEnabled, LookEnabled: h.looks != nil}); err != nil {
 		return
 	}
 }

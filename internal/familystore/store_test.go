@@ -55,3 +55,22 @@ func TestRejectsInvalidNames(t *testing.T) {
 		t.Fatalf("expected invalid name, got %v", err)
 	}
 }
+
+func TestChildNameIsTenantQualified(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "family.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant := authz.GuardianGrant{GuardianID: "g", ChildID: "c", TenantID: "t", Active: true, CanManageDevices: true, CanApproveContacts: true}
+	if err := s.Bootstrap(familydashboard.Child{ID: "c", TenantID: "t", DisplayName: "Alex"}, grant); err != nil {
+		t.Fatal(err)
+	}
+	if name, ok := s.ChildName("t", "c"); !ok || name != "Alex" {
+		t.Fatalf("got %q %v", name, ok)
+	}
+	for _, q := range [][2]string{{"other", "c"}, {"t", "missing"}, {"", "c"}, {"t", ""}} {
+		if name, ok := s.ChildName(q[0], q[1]); ok || name != "" {
+			t.Fatalf("lookup %v returned %q", q, name)
+		}
+	}
+}

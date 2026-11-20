@@ -49,27 +49,62 @@ func TestContactPairsAndRevocation(t *testing.T) {
 		{"adult-adult", ParticipantAdult, ParticipantAdult},
 	} {
 		t.Run(pair.name, func(t *testing.T) {
-			g := ContactGrant{TenantID: "family", FirstID: "one", SecondID: "two", FirstKind: pair.a, SecondKind: pair.b, FirstApproved: true, SecondApproved: true, Active: true}
-			if !CanContact(g, "family", "one", "two") || !CanContact(g, "family", "two", "one") {
+			one := Participant{TenantID: "family", ID: "one", Kind: pair.a}
+			two := Participant{TenantID: "family", ID: "two", Kind: pair.b}
+			g := ContactGrant{First: one, Second: two, FirstApproved: true, SecondApproved: true, Active: true}
+			if !CanContact(g, one, two) || !CanContact(g, two, one) {
 				t.Fatal("mutually approved pair denied")
 			}
-			if CanContact(g, "other", "one", "two") || CanContact(g, "family", "one", "stranger") {
-				t.Fatal("cross-tenant or stranger contact allowed")
+			stranger := Participant{TenantID: "family", ID: "stranger", Kind: pair.b}
+			if CanContact(g, one, stranger) || CanContact(g, stranger, two) {
+				t.Fatal("stranger contact allowed")
 			}
 			g.SecondApproved = false
-			if CanContact(g, "family", "one", "two") {
+			if CanContact(g, one, two) {
 				t.Fatal("one-sided consent allowed")
 			}
 			g.SecondApproved = true
 			g.Active = false
-			if CanContact(g, "family", "one", "two") {
+			if CanContact(g, one, two) {
 				t.Fatal("revoked contact allowed")
 			}
 			g.Active = true
-			g.FirstKind = ParticipantUnknown
-			if CanContact(g, "family", "one", "two") {
+			g.First.Kind = ParticipantUnknown
+			if CanContact(g, one, two) {
 				t.Fatal("unknown participant type allowed")
 			}
 		})
+	}
+}
+
+// Contacts may span two family tenants, but only for the exact tenant-qualified
+// pair in the grant. A matching ID in another tenant is a different person.
+func TestCrossFamilyContactIsTenantQualified(t *testing.T) {
+	lea := Participant{TenantID: "family-a", ID: "child-1", Kind: ParticipantChild}
+	mia := Participant{TenantID: "family-b", ID: "child-1", Kind: ParticipantChild}
+	g := ContactGrant{First: lea, Second: mia, FirstApproved: true, SecondApproved: true, Active: true}
+	if !CanContact(g, lea, mia) || !CanContact(g, mia, lea) {
+		t.Fatal("approved cross-family pair denied")
+	}
+	denied := map[string][2]Participant{
+		"same id in third tenant":   {lea, {TenantID: "family-c", ID: "child-1", Kind: ParticipantChild}},
+		"sender tenant swapped":     {{TenantID: "family-b", ID: "child-1", Kind: ParticipantChild}, mia},
+		"self contact":              {lea, lea},
+		"empty tenant":              {{ID: "child-1", Kind: ParticipantChild}, mia},
+		"empty id":                  {{TenantID: "family-a", Kind: ParticipantChild}, mia},
+		"kind differs from grant":   {{TenantID: "family-a", ID: "child-1", Kind: ParticipantAdult}, mia},
+		"recipient kind is unknown": {lea, {TenantID: "family-b", ID: "child-1"}},
+	}
+	for name, pair := range denied {
+		if CanContact(g, pair[0], pair[1]) {
+			t.Errorf("%s: contact allowed", name)
+		}
+	}
+	if CanContact(ContactGrant{}, Participant{}, Participant{}) {
+		t.Fatal("zero-value grant must be denied")
+	}
+	same := ContactGrant{First: lea, Second: lea, FirstApproved: true, SecondApproved: true, Active: true}
+	if CanContact(same, lea, lea) {
+		t.Fatal("grant from a participant to itself must be denied")
 	}
 }

@@ -52,6 +52,16 @@ can view linked devices, start five-minute pairing challenges and revoke devices
 for their authorized children. See the [setup and limitations](docs/planning/guardian-device-management.md).
 **Browser key-based child enrollment and explicit guardian fingerprint approval are now wired** using a short-lived invitation link. **Locally rendered QR images and a child scanner page** are now included. The scanner supports the browser's BarcodeDetector where available, otherwise the native phone camera or a shared link. Child device sessions, messaging authorization and real iPhone/Android tests are still open. See [the browser pairing flow](docs/planning/browser-device-pairing.md).
 
+## Guardian contact approval (preview)
+
+When the optional `YAPUNO_CONTACTS_FILE` is configured, guardians of two
+families can connect two children: one family creates a one-time code, the
+other redeems it for their child, and the first family confirms the named
+request. Only then is the contact active; either family can end it. There is
+no directory or search. **Messaging does not exist yet**, so this only records
+the approved relationship. See [the flow and limitations](docs/planning/guardian-contact-approval.md)
+and the [proposed ADR](docs/adr/draft-contact-invitations.md).
+
 ## Mein Look (preview)
 
 When the optional `YAPUNO_APPEARANCE_FILE` is configured, authenticated guardians
