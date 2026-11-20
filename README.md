@@ -71,7 +71,8 @@ devices. Every send and read is authorized from current contact, profile and
 device state; retries are idempotent; a message is confirmed only after it is
 on disk. Guardians cannot read messages. A child can block a contact and, with
 `YAPUNO_REPORTS_FILE`, report one message to their own guardians, who then see
-exactly that message ([report and block](docs/planning/report-and-block.md),
+exactly that message and are told by an e-mail that names only their own child
+([report and block](docs/planning/report-and-block.md),
 [proposed ADR](docs/adr/draft-report-and-block.md)). **Messages are stored in
 plaintext, there is no moderation or escalation, and this must not be used with
 real children.** See [the preview and its limits](docs/planning/messaging-preview.md)

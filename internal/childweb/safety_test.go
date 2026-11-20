@@ -446,3 +446,27 @@ func TestReportsNeedMessaging(t *testing.T) {
 		t.Fatal("reports enabled without messaging")
 	}
 }
+
+func TestChildIsToldAboutTheEmailOnlyWhenOneIsSent(t *testing.T) {
+	sw := newSafetyWorld(t, true)
+	sw.say(t, beaParty, "irgendwas")
+	quiet := sw.safety(sw.alex, "").Body.String()
+	if strings.Contains(quiet, "E-Mail") {
+		t.Fatal("page promises an e-mail although none is configured")
+	}
+	h, err := New(sw.sessions, sw.families, Options{Contacts: sw.contacts, Looks: sw.looks, Messages: sw.store, Reports: sw.reports, ReportNotices: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sw.handler = h
+	loud := sw.safety(sw.alex, "").Body.String()
+	for _, want := range []string{"Yapuno schreibt deinen Eltern eine E-Mail", "steht nicht in der E-Mail", "Sag es ihnen am besten auch selbst"} {
+		if !strings.Contains(loud, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	// A notice without a report store makes no sense.
+	if _, err := New(sw.sessions, sw.families, Options{Contacts: sw.contacts, Messages: sw.store, ReportNotices: true}); err == nil {
+		t.Fatal("report notices enabled without reports")
+	}
+}

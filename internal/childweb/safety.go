@@ -103,7 +103,7 @@ var safetyPage = template.Must(template.New("child-safety").Parse(`<!doctype htm
 {{end}}{{end}}</fieldset>
 {{if .Selectable}}<label class="yp-check"><input type="checkbox" name="block" value="yes"> <span>Ausserdem {{.Peer}} blockieren.</span></label>
 <button class="yp-primary" type="submit">Diese Nachricht melden</button>{{end}}</form>
-<p class="yp-muted">Deine Eltern sehen die Meldung, wenn sie Yapuno öffnen. Sag es ihnen am besten auch selbst.</p>
+<p class="yp-muted">Deine Eltern sehen die Meldung, wenn sie Yapuno öffnen.{{if .Notices}} Yapuno schreibt deinen Eltern eine E-Mail, dass du etwas gemeldet hast. Die Nachricht selbst steht nicht in der E-Mail.{{end}} Sag es ihnen am besten auch selbst.</p>
 {{else}}<p class="yp-muted">{{.Peer}} hat dir hier noch nichts geschrieben.</p>{{end}}</section>{{end}}
 <section aria-labelledby="yp-block"><h2 id="yp-block">{{.Peer}} blockieren</h2>
 <ul class="yp-facts"><li>Ihr könnt euch nicht mehr schreiben.</li><li>Der Chat verschwindet.</li><li>Nur deine Eltern können das wieder aufheben.</li><li>Deine Eltern sehen, dass du blockiert hast, aber keine Nachrichten.</li></ul>
@@ -163,12 +163,12 @@ func (h *handler) renderSafety(w http.ResponseWriter, r *http.Request, s childse
 	w.WriteHeader(status)
 	_ = safetyPage.Execute(w, struct {
 		Skin, Title, Peer, Conversation, CSRF, Alert, Notice string
-		Reports, Selectable                                  bool
+		Reports, Selectable, Notices                         bool
 		CSS                                                  template.CSS
 		Messages                                             []reportChoice
 	}{
 		Skin: def.ID, Title: h.safetyTitle(), Peer: peer, Conversation: conversationID, CSRF: s.CSRFToken, Alert: alert, Notice: notice,
-		Reports: h.opt.Reports != nil, Selectable: selectable, Messages: choices,
+		Reports: h.opt.Reports != nil, Selectable: selectable, Notices: h.opt.ReportNotices, Messages: choices,
 		// Validated first-party skin tokens and fixed component rules only.
 		CSS: template.CSS(fontassets.FaceCSS(def.Typography.Heading, def.Typography.Body) + ".yp-child{" + decls + "}\n" + homeCSS + safetyCSS),
 	})

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,8 @@ type noticeMailer struct {
 	mu      sync.Mutex
 	links   map[string]string
 	notices []string
+	// reportNotices holds "address about child name" for every report notice.
+	reportNotices []string
 }
 
 func (m *noticeMailer) SendSignInLink(_ context.Context, email, link string) error {
@@ -44,6 +47,28 @@ func (m *noticeMailer) SendAccessLockNotice(_ context.Context, email string) err
 	defer m.mu.Unlock()
 	m.notices = append(m.notices, email)
 	return nil
+}
+
+func (m *noticeMailer) SendReportNotice(_ context.Context, email, childName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reportNotices = append(m.reportNotices, email+" about "+childName)
+	return nil
+}
+
+// reports waits briefly for background mail and returns what was sent, sorted.
+func (m *noticeMailer) reports(want int) []string {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		m.mu.Lock()
+		got := append([]string(nil), m.reportNotices...)
+		m.mu.Unlock()
+		if len(got) >= want || time.Now().After(deadline) {
+			sort.Strings(got)
+			return got
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func (m *noticeMailer) link(email string) string {

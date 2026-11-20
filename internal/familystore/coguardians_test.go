@@ -71,3 +71,40 @@ func TestCoGuardiansIgnoreInactiveGrants(t *testing.T) {
 		t.Fatalf("revoked guardian sees co-guardians: %v", got)
 	}
 }
+
+func TestGuardiansOfListsGuardiansWithAnActiveGrantForExactlyThatChild(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "family.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant := func(guardian, child, tenant string) authz.GuardianGrant {
+		return authz.GuardianGrant{GuardianID: guardian, ChildID: child, TenantID: tenant, Active: true, CanManageDevices: true, CanApproveContacts: true}
+	}
+	for _, c := range []struct{ child, tenant, guardian string }{
+		{"alex", "family-1", "anna"}, {"ada", "family-1", "anna"}, {"alex", "family-2", "zoe"},
+	} {
+		if err := s.Bootstrap(familydashboard.Child{ID: c.child, TenantID: c.tenant, DisplayName: "Kind"}, grant(c.guardian, c.child, c.tenant)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.BootstrapGuardian(grant("ben", "alex", "family-1")); err != nil {
+		t.Fatal(err)
+	}
+	s.state.Grants = append(s.state.Grants, authz.GuardianGrant{GuardianID: "former", ChildID: "alex", TenantID: "family-1", Active: false, CanManageDevices: true, CanApproveContacts: true})
+	for _, c := range []struct {
+		tenant, child string
+		want          []string
+	}{
+		{"family-1", "alex", []string{"anna", "ben"}},
+		{"family-1", "ada", []string{"anna"}},
+		{"family-2", "alex", []string{"zoe"}},
+		{"family-1", "ghost", nil},
+		{"family-3", "alex", nil},
+		{"", "alex", nil},
+		{"family-1", "", nil},
+	} {
+		if got := s.GuardiansOf(c.tenant, c.child); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("GuardiansOf(%q, %q) = %v, want %v", c.tenant, c.child, got, c.want)
+		}
+	}
+}

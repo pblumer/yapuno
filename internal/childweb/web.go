@@ -75,6 +75,9 @@ type Options struct {
 	// Reports lets a child report one message to its own guardians. It
 	// requires Messages.
 	Reports Reports
+	// ReportNotices says that guardians are e-mailed about a new report, so
+	// the child is told. It requires Reports.
+	ReportNotices bool
 }
 
 type handler struct {
@@ -93,6 +96,9 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 	}
 	if opt.Reports != nil && opt.Messages == nil {
 		return nil, errors.New("reporting requires messaging")
+	}
+	if opt.ReportNotices && opt.Reports == nil {
+		return nil, errors.New("report notices require reporting")
 	}
 	h := &handler{sessions: sessions, children: children, opt: opt}
 	mux := http.NewServeMux()

@@ -66,3 +66,25 @@ func (s *Store) CoGuardians(guardianID, tenantID string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// GuardiansOf returns the ids of the guardians who hold an active grant for
+// this child, sorted. It says nothing about what each may do: callers that
+// act on the result must still check the guardian's permissions (for example
+// through Cards). It is used to notify guardians and reveals no child data.
+func (s *Store) GuardiansOf(tenantID, childID string) []string {
+	if tenantID == "" || childID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := make(map[string]bool)
+	var out []string
+	for _, g := range s.state.Grants {
+		if g.Active && g.TenantID == tenantID && g.ChildID == childID && g.GuardianID != "" && !seen[g.GuardianID] {
+			seen[g.GuardianID] = true
+			out = append(out, g.GuardianID)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
