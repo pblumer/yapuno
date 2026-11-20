@@ -26,7 +26,7 @@ The page is mounted together with the device pages whenever device pairing is en
 - **No remote wipe.** The device still holds its (now useless) key and device id. Content already on screen stays visible until the page next reaches the server; an offline device keeps showing it. Received messages are not stored on the device, but the child's own draft and unsent texts live in that tab's session storage.
 - **No undo of earlier activity.** Whatever a finder read or sent before the lock stays read and stays in the conversation. There is no marker for "sent while the device was lost".
 - **No notification.** Neither the other guardian, nor the child, nor contacts are told, and there is no audit record of who locked which device when.
-- **Guardian devices are out of scope.** This page locks child devices only. A lost guardian device is covered only by the 30-minute guardian session lifetime and by control over the guardian's mailbox.
+- **Guardian devices are a separate page.** This page locks child devices only. For a lost guardian device see [guardian account safety](guardian-account-safety.md).
 
 ## Security properties (tested)
 

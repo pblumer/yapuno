@@ -114,3 +114,48 @@ func (m *Manager) Revoke(r *http.Request) {
 		}
 	}
 }
+
+// Count returns the number of unexpired sessions of one guardian.
+func (m *Manager) Count(guardianID, tenantID string) int {
+	if guardianID == "" || tenantID == "" {
+		return 0
+	}
+	now := m.now()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, entry := range m.sessions {
+		if entry.guardianID == guardianID && entry.tenantID == tenantID && now.Before(entry.expires) {
+			count++
+		}
+	}
+	return count
+}
+
+// RevokeAll ends every session of one guardian in this process ("sign out
+// everywhere") and returns how many were ended. Callers must take guardian
+// and tenant from a verified session. It does not prevent a new sign-in.
+func (m *Manager) RevokeAll(guardianID, tenantID string) int {
+	if guardianID == "" || tenantID == "" {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ended := 0
+	for key, entry := range m.sessions {
+		if entry.guardianID == guardianID && entry.tenantID == tenantID {
+			delete(m.sessions, key)
+			ended++
+		}
+	}
+	return ended
+}
+
+// Clear tells the browser to drop the session cookie. It does not end the
+// server-side session; use Revoke or RevokeAll for that.
+func (m *Manager) Clear(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name: CookieName, Value: "", Path: "/", Secure: true,
+		HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1,
+	})
+}

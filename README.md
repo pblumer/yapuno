@@ -52,6 +52,15 @@ can view linked devices, start five-minute pairing challenges and revoke devices
 for their authorized children. See the [setup and limitations](docs/planning/guardian-device-management.md).
 A **"Gerät verloren"** page locks one or all devices of a child and cancels pairings in progress; it is server-side
 revocation, not a remote wipe. See [what a lock does and does not do](docs/planning/device-lost.md).
+
+## Guardian account safety (preview)
+
+Guardians can sign out, sign out everywhere and, with the optional
+`YAPUNO_GUARDIAN_LOCKS_FILE`, lock their own access when a device or mailbox may
+be in someone else's hands. A lock stops sign-in links, ends all sessions and
+notifies the other guardians of the same children; only the operator lifts it.
+See [the three steps and their limits](docs/planning/guardian-account-safety.md)
+and the [proposed ADR](docs/adr/draft-guardian-access-lock.md).
 **Browser key-based child enrollment and explicit guardian fingerprint approval are now wired** using a short-lived invitation link. **Locally rendered QR images and a child scanner page** are now included. The scanner supports the browser's BarcodeDetector where available, otherwise the native phone camera or a shared link. Messaging authorization and real iPhone/Android tests are still open. See [the browser pairing flow](docs/planning/browser-device-pairing.md).
 
 ## Messaging (preview)

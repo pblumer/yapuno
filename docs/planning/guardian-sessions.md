@@ -13,6 +13,7 @@ headers, query strings and form IDs must never become issuance authority.
 
 ## Operational limits
 
+- Guardians end their own session, or all of them, on the [security page](guardian-account-safety.md).
 - Session records are held in RAM and discarded when the process restarts;
   neither inter-instance sharing nor durable revocation is implemented.
 - Sessions should not be used in a horizontally scaled deployment without
