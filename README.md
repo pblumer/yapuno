@@ -83,10 +83,10 @@ and the [proposed ADR](docs/adr/draft-contact-invitations.md).
 
 ## Mein Look (preview)
 
-When the optional `YAPUNO_APPEARANCE_FILE` is configured, authenticated guardians
-can choose a theme and a photo-free figure at `/family/look`; the family page
-then uses that look. Children cannot use it yet because child device sessions do
-not exist. See [Mein Look](docs/planning/mein-look.md).
+When the optional `YAPUNO_APPEARANCE_FILE` is configured, guardians (`/family/look`)
+and signed-in children (`/child/look`) each choose a theme and a photo-free
+figure. A theme is private; a child's figure is shown to mutually approved
+contacts only. See [Mein Look](docs/planning/mein-look.md).
 
 ## Open source direction
 The repository is public. **A distribution license has not yet been selected; public visibility by itself does not confer a license to reuse the code.** We intend to choose and publish an appropriate OSI-approved license before accepting broader contributions or releasing an installable build.

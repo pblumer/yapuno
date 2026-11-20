@@ -169,7 +169,7 @@ func (h *contactHandler) css(p Session) (string, template.CSS, error) {
 		id = h.looks.Get(appearance.Subject{Kind: appearance.KindGuardian, TenantID: p.TenantID, ID: p.GuardianID}).Skin
 	}
 	def := skin.Resolve(id, catalog, catalog["classic"])
-	decls, err := declarationsOf(def)
+	decls, err := skin.Declarations(def)
 	if err != nil {
 		return "", "", err
 	}

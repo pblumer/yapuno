@@ -140,3 +140,24 @@ func TestStylesheet(t *testing.T) {
 		}
 	}
 }
+
+func TestDeclarationsMatchCSSVariablesWithoutSelector(t *testing.T) {
+	for id, s := range Catalog() {
+		decls, err := Declarations(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrapped, err := CSSVariables(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wrapped != ":root{"+decls+"}" || strings.ContainsAny(decls, "{}") || !strings.HasSuffix(decls, ";") {
+			t.Fatalf("%s: declarations do not match the wrapped form", id)
+		}
+	}
+	invalid := validSkin()
+	invalid.Colors.Text = "red;}body{display:none"
+	if decls, err := Declarations(invalid); err == nil || decls != "" {
+		t.Fatal("declarations emitted for an invalid skin")
+	}
+}

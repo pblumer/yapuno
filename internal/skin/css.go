@@ -17,6 +17,13 @@ func CSSVariables(s Definition) (string, error) {
 	return ":root{" + decls + "}", nil
 }
 
+// Declarations returns the same custom properties without a selector, for
+// callers that scope them to their own root element. Like CSSVariables it
+// emits nothing for a skin that does not validate.
+func Declarations(s Definition) (string, error) {
+	return declarations(s)
+}
+
 func declarations(s Definition) (string, error) {
 	if err := Validate(s); err != nil {
 		return "", err

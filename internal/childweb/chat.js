@@ -40,6 +40,8 @@
   function toEnd() { list.scrollTop = list.scrollHeight; window.scrollTo(0, document.body.scrollHeight); }
 
   function bubble(mine, body) {
+    const empty = list.querySelector(".yp-empty");
+    if (empty) empty.remove();
     const item = document.createElement("li");
     item.className = "yp-msg " + (mine ? "yp-mine" : "yp-theirs");
     const text = document.createElement("p");
