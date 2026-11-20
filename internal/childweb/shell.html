@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Yapuno</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#141a2e;background:#ffffff}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:1.25rem 1rem}
+main{max-width:30rem;margin:0 auto}
+header{font-weight:850;font-size:1.4rem;letter-spacing:-.05em}header span{color:#3355aa}
+h1{font-size:2rem;line-height:1.1;letter-spacing:-.03em;margin:1.2rem 0 .6rem}
+p{line-height:1.5;color:#5c6378}#status{color:#141a2e;font-weight:700;min-height:1.5rem}
+a.button,button{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:.7rem 1.1rem;border-radius:16px;font:inherit;font-weight:800;text-decoration:none;cursor:pointer}
+a.button{background:#3355aa;color:#ffffff;border:0}
+button{background:#ffffff;color:#141a2e;border:2px solid #5c6378;margin-top:.6rem}
+a.button:focus-visible,button:focus-visible{outline:3px solid #3355aa;outline-offset:3px}
+section{margin-top:1.4rem;padding:1rem;border:1px solid #dde1ea;border-radius:16px;background:#f3f5fa}
+</style>
+</head>
+<body>
+<main>
+<header>ya<span>puno</span></header>
+<h1>Hoi!</h1>
+<p id="status" role="status" aria-live="polite">Yapuno wird geöffnet …</p>
+<noscript><p>Für die Anmeldung braucht Yapuno JavaScript. Bitte schalte es für diese Seite ein.</p></noscript>
+<section id="unpaired" hidden aria-labelledby="unpaired-title">
+<h2 id="unpaired-title">Dieses Gerät ist noch nicht verbunden</h2>
+<p>Bitte deine Eltern, in Yapuno einen Code für dein Gerät zu erstellen. Du brauchst kein Passwort.</p>
+<p><a class="button" href="/pair/scan">Code der Eltern scannen</a></p>
+</section>
+<section id="retry" hidden aria-labelledby="retry-title">
+<h2 id="retry-title">Das hat nicht geklappt</h2>
+<p id="retry-reason"></p>
+<button type="button" id="retry-button">Nochmal versuchen</button>
+</section>
+<p><small>Vorschau – noch nicht für echte Kinderdaten freigegeben.</small></p>
+</main>
+<script src="/child/sig-utils.js" defer></script>
+<script src="/child/app.js" defer></script>
+</body>
+</html>

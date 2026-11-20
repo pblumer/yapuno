@@ -445,6 +445,32 @@ func (s *Store) Overview(guardian, tenant, child string) (Overview, error) {
 	return view, nil
 }
 
+// ContactsOf lists the active contacts of one child by display name. It
+// performs no guardian check: the caller must have authenticated this exact
+// child (for example through a child device session).
+func (s *Store) ContactsOf(p Party) []Entry {
+	if !p.valid() {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.exists(p) {
+		return nil
+	}
+	var out []Entry
+	for _, l := range s.state.Links {
+		if !l.Active || !l.involves(p) {
+			continue
+		}
+		other := l.other(p)
+		if name, ok := s.families.ChildName(other.TenantID, other.ChildID); ok {
+			out = append(out, Entry{ID: l.ID, Name: name})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name+out[i].ID < out[j].Name+out[j].ID })
+	return out
+}
+
 // Allowed reports whether two children are mutually approved contacts right
 // now. It authorizes the relationship only: device approval, sender status
 // and per-operation checks remain separate (see authz.CanContact).

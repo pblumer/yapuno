@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/pblumer/yapuno/internal/appearance"
+	"github.com/pblumer/yapuno/internal/childsession"
+	"github.com/pblumer/yapuno/internal/childweb"
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/devicepairing"
 	"github.com/pblumer/yapuno/internal/familystore"
@@ -111,6 +113,25 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 		}
 		mux.Handle("/pair", childRoutes)
 		mux.Handle("/pair/", childRoutes)
+		// Paired devices sign in with their bound key; sessions live in this
+		// process only and end on restart, after which devices sign in again.
+		childSessions, err := childsession.New(opt.pairing, store, time.Now, 12*time.Hour)
+		if err != nil {
+			return nil, err
+		}
+		childOptions := childweb.Options{}
+		if opt.contacts != nil {
+			childOptions.Contacts = opt.contacts
+		}
+		if opt.appearance != nil {
+			childOptions.Looks = opt.appearance
+		}
+		childPages, err := childweb.New(childSessions, store, childOptions)
+		if err != nil {
+			return nil, err
+		}
+		mux.Handle("/child", childPages)
+		mux.Handle("/child/", childPages)
 	}
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/login", http.StatusSeeOther) })
 	// Reject host-header poisoning even behind a TLS-terminating reverse proxy.

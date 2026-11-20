@@ -3,8 +3,9 @@
 **Status:** End-to-end QR-or-link browser engineering preview for synthetic
 child profiles. The guardian QR image is created locally; children can scan
 using the native phone camera or the optional in-browser scanner. Browser camera
-recognition depends on `BarcodeDetector` support. Production device sessions
-and real-device compatibility validation remain **not implemented**. Never use
+recognition depends on `BarcodeDetector` support. A paired device can sign in
+through [preview child device sessions](child-device-sessions.md); production
+sessions and real-device compatibility validation remain **not implemented**. Never use
 this with real children's data.
 
 ## What works in the preview
@@ -36,7 +37,9 @@ this with real children's data.
    approval, signs it with the same private key and completes the durable,
    one-time device registration.
 6. The guardian can see the device in the list and revoke it. The child page
-   explicitly says that chat and child login are not yet available.
+   offers **Yapuno öffnen**, which signs the device in at `/child` with the
+   paired key ([child device sessions](child-device-sessions.md)). Chat is not
+   yet available.
 
 Parent API (`internal/familyweb`):
 - `POST /family/devices/status`: needs verified guardian session, session CSRF
