@@ -37,6 +37,6 @@ A unit test with 300 random signatures checks that the browser's IEEE-P1363 sign
 - Sessions and challenges are in memory in one process; no rate limiting.
 - The login shell uses fixed colors because no child is known yet; the home page uses skin tokens.
 - Several children paired in one browser profile, key rotation, recovery and guardian-visible session lists are not implemented.
-- Child-side "Mein Look", block/report and messaging are separate steps.
+- Block/report is a separate step. Children choose their own look in ["Mein Look"](mein-look.md).
 
 Related #2, #14, #4, #5.

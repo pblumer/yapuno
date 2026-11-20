@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/pblumer/yapuno/internal/appearance"
+	"github.com/pblumer/yapuno/internal/authz"
 	"github.com/pblumer/yapuno/internal/childsession"
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/skin"
@@ -46,14 +47,18 @@ type Children interface {
 	ChildName(tenantID, childID string) (string, bool)
 }
 
-// Contacts lists a child's mutually approved contacts.
+// Contacts lists a child's mutually approved contacts and resolves the other
+// party of one of the child's own relationships.
 type Contacts interface {
 	ContactsOf(contacts.Party) []contacts.Entry
+	Grant(id string, self contacts.Party) (contacts.Party, authz.ContactGrant, bool)
 }
 
-// Looks returns a saved look.
+// Looks reads and stores looks. The handler only ever stores the look of the
+// authenticated child.
 type Looks interface {
 	Get(appearance.Subject) appearance.Preference
+	Set(appearance.Subject, appearance.Preference) error
 }
 
 // Options are optional collaborators; nil values disable the feature.
@@ -86,6 +91,10 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 	mux.HandleFunc("POST /child/session/challenge", h.challenge)
 	mux.HandleFunc("POST /child/session/login", h.login)
 	mux.HandleFunc("POST /child/session/logout", h.logout)
+	if opt.Looks != nil {
+		mux.HandleFunc("GET /child/look", h.lookView)
+		mux.HandleFunc("POST /child/look", h.lookSave)
+	}
 	if opt.Messages != nil {
 		mux.HandleFunc("GET /child/chat.js", h.asset(chatJS))
 		mux.HandleFunc("GET /child/chat-utils.js", h.asset(chatUtilsJS))
@@ -247,6 +256,10 @@ const homeCSS = `body{margin:0}
 .yp-crew a{flex:1;display:flex;align-items:center;gap:.8rem;min-height:64px;padding:.7rem .9rem;border-radius:var(--yp-radius);color:var(--yp-text);text-decoration:none}
 .yp-crew a:focus-visible{outline:3px solid var(--yp-focus);outline-offset:2px}
 .yp-go{margin-left:auto;color:var(--yp-accent-text);font-size:1.4rem}
+.yp-crew svg{flex:none}
+.yp-me{display:grid;place-items:center;min-width:52px;min-height:52px;border-radius:50%;color:var(--yp-text)}
+.yp-link{display:inline-flex;align-items:center;min-height:48px;padding:.7rem 1rem;border-radius:var(--yp-radius);background:var(--yp-accent);color:var(--yp-on-accent);font-weight:800;text-decoration:none}
+.yp-me:focus-visible,.yp-link:focus-visible{outline:3px solid var(--yp-focus);outline-offset:2px}
 .yp-initial{flex:none;display:grid;place-items:center;width:44px;height:44px;border-radius:50%;background:var(--yp-accent);color:var(--yp-on-accent);font-weight:800}
 .yp-empty{padding:1rem;border:2px dashed var(--yp-line);border-radius:var(--yp-radius);color:var(--yp-text-muted)}
 .yp-note{margin-top:1.6rem;padding:1rem;border-radius:var(--yp-radius);background:var(--yp-surface)}
@@ -257,20 +270,22 @@ const homeCSS = `body{margin:0}
 
 var homePage = template.Must(template.New("child-home").Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>Yapuno</title><style>{{.CSS}}</style></head><body>
 <main class="yp-child" data-yp-skin="{{.Skin}}"><div class="yp-shell">
-<header class="yp-top"><div class="yp-logo">ya<span>puno</span></div>{{.Figure}}</header>
+<header class="yp-top"><div class="yp-logo">ya<span>puno</span></div>{{if .LookHref}}<a class="yp-me" href="{{.LookHref}}" aria-label="Mein Look">{{.Figure}}</a>{{else}}{{.Figure}}{{end}}</header>
 <h1>Hoi {{.Name}}!</h1>
 <p class="yp-muted">Schön, dass du da bist.</p>
 <h2>Deine Crew</h2>
-{{if .Crew}}<ul class="yp-crew">{{range .Crew}}<li>{{if .Chat}}<a href="/child/chat/{{.Chat}}"><span class="yp-initial" aria-hidden="true">{{.Initial}}</span><span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a>{{else}}<span class="yp-initial" aria-hidden="true">{{.Initial}}</span><span>{{.Name}}</span>{{end}}</li>{{end}}</ul>{{else}}<p class="yp-empty">Noch niemand in deiner Crew. Deine Eltern können dich mit anderen Kindern verbinden.</p>{{end}}
+{{if .Crew}}<ul class="yp-crew">{{range .Crew}}<li>{{if .Chat}}<a href="/child/chat/{{.Chat}}">{{template "face" .}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a>{{else}}{{template "face" .}}<span>{{.Name}}</span>{{end}}</li>{{end}}</ul>{{else}}<p class="yp-empty">Noch niemand in deiner Crew. Deine Eltern können dich mit anderen Kindern verbinden.</p>{{end}}
 <p class="yp-muted">In deiner Crew sind nur Kinder, denen beide Familien zugestimmt haben. Fremde können dich nicht finden.</p>
 <p class="yp-note">{{if .Chats}}Tippe auf einen Namen, um zu schreiben. Das hier ist eine Vorschau.{{else}}Nachrichten schreiben kommt bald. Das hier ist eine Vorschau.{{end}}</p>
+{{if .LookHref}}<p><a class="yp-link" href="{{.LookHref}}">Mein Look ändern</a></p>{{end}}
 <form method="post" action="/child/session/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit">Auf diesem Gerät abmelden</button></form>
-</div></main></body></html>`))
+</div></main></body></html>{{define "face"}}{{if .Figure}}{{.Figure}}{{else}}<span class="yp-initial" aria-hidden="true">{{.Initial}}</span>{{end}}{{end}}`))
 
 type crewMember struct {
 	Name    string
 	Initial string
-	Chat    string // conversation id when messaging is enabled
+	Chat    string        // conversation id when messaging is enabled
+	Figure  template.HTML // the contact's figure, when looks are enabled
 }
 
 func (h *handler) home(w http.ResponseWriter, r *http.Request) {
@@ -300,19 +315,24 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 		figure = ""
 	}
 	var crew []crewMember
+	self := contacts.Party{TenantID: s.TenantID, ChildID: s.ChildID}
 	if h.opt.Contacts != nil {
-		for _, c := range h.opt.Contacts.ContactsOf(contacts.Party{TenantID: s.TenantID, ChildID: s.ChildID}) {
+		for _, c := range h.opt.Contacts.ContactsOf(self) {
 			initial := ""
 			for _, r := range c.Name {
 				initial = strings.ToUpper(string(r))
 				break
 			}
-			member := crewMember{Name: c.Name, Initial: initial}
+			member := crewMember{Name: c.Name, Initial: initial, Figure: h.peerFigure(self, c.ID)}
 			if h.opt.Messages != nil {
 				member.Chat = c.ID
 			}
 			crew = append(crew, member)
 		}
+	}
+	lookHref := ""
+	if h.opt.Looks != nil {
+		lookHref = "/child/look"
 	}
 	decls := strings.TrimSuffix(strings.TrimPrefix(tokens, ":root{"), "}")
 	headers(w, false)
@@ -323,12 +343,33 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 		Figure           template.HTML
 		Crew             []crewMember
 		Chats            bool
+		LookHref         string
 	}{
 		Skin: def.ID, Name: name, CSRF: s.CSRFToken,
 		// Validated first-party skin tokens and fixed component rules only.
 		CSS:    template.CSS(".yp-child{" + decls + "}\n" + homeCSS),
-		Figure: figure, Crew: crew, Chats: h.opt.Messages != nil,
+		Figure: figure, Crew: crew, Chats: h.opt.Messages != nil, LookHref: lookHref,
 	})
+}
+
+// peerFigure returns the figure of the other child in one of self's own
+// active relationships. A figure is shown to mutually approved contacts only;
+// the contact's theme is never exposed. The other child's identifiers stay on
+// the server.
+func (h *handler) peerFigure(self contacts.Party, relationshipID string) template.HTML {
+	if h.opt.Looks == nil || h.opt.Contacts == nil {
+		return ""
+	}
+	peer, grant, ok := h.opt.Contacts.Grant(relationshipID, self)
+	if !ok || !authz.CanContact(grant, self.Participant(), peer.Participant()) {
+		return ""
+	}
+	look := h.opt.Looks.Get(appearance.Subject{Kind: appearance.KindChild, TenantID: peer.TenantID, ID: peer.ChildID})
+	figure, err := appearance.FigureSVG(look.Figure, 44)
+	if err != nil {
+		return ""
+	}
+	return figure
 }
 
 // shell is static: it contains no child data and starts the key-based login.
