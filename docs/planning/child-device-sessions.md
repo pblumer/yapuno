@@ -12,7 +12,7 @@ Child pages are mounted whenever device pairing is enabled (`YAPUNO_PAIRING_FILE
 2. `/child` shows a login shell without any child data. Its script finds the device key stored during pairing, requests a challenge, signs it and receives a session cookie.
 3. The page reloads into the home page: greeting, figure, **Deine Crew** (mutually approved contacts only) and a sign-out button. The home page contains no script.
 4. When the session ends (12 hours, server restart), the shell signs in again silently. After an explicit sign-out it waits for **Wieder anmelden**.
-5. When a guardian revokes the device, the next request falls back to the shell, which reports that the device is no longer approved.
+5. When a guardian revokes the device, for example on the ["Gerät verloren" page](device-lost.md), the next request falls back to the shell, which reports that the device is no longer approved.
 
 ## Security properties (tested)
 

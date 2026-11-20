@@ -41,7 +41,7 @@ Both JSON endpoints require the exact HTTPS `Origin`, JSON content type, a 4 KiB
 
 ### What this does and does not guarantee
 - A copied session cookie works for at most 12 hours and cannot be renewed without the device key.
-- The private key is created non-extractable by WebCrypto and never leaves the browser profile. **It is not hardware-backed or attested.** Malware or a compromised browser on the device, or script injected into the origin, can use the key while it runs. Anyone holding the unlocked device is the child as far as Yapuno can tell.
+- The private key is created non-extractable by WebCrypto and never leaves the browser profile. **It is not hardware-backed or attested.** Malware or a compromised browser on the device, or script injected into the origin, can use the key while it runs. Anyone holding the unlocked device is the child as far as Yapuno can tell. A guardian ends that by locking the device on the ["Gerät verloren" page](../planning/device-lost.md); this is server-side revocation, not a remote wipe.
 - Clearing site data, private browsing or some OS storage eviction deletes the key; the device must then be paired again.
 - A browser profile that pairs several children signs in as the first device the server accepts; switching profiles is not designed yet.
 
