@@ -50,6 +50,8 @@ messaging or production-ready security. See the
 When the optional `YAPUNO_PAIRING_FILE` is configured, authenticated guardians
 can view linked devices, start five-minute pairing challenges and revoke devices
 for their authorized children. See the [setup and limitations](docs/planning/guardian-device-management.md).
+A **"Gerät verloren"** page locks one or all devices of a child and cancels pairings in progress; it is server-side
+revocation, not a remote wipe. See [what a lock does and does not do](docs/planning/device-lost.md).
 **Browser key-based child enrollment and explicit guardian fingerprint approval are now wired** using a short-lived invitation link. **Locally rendered QR images and a child scanner page** are now included. The scanner supports the browser's BarcodeDetector where available, otherwise the native phone camera or a shared link. Messaging authorization and real iPhone/Android tests are still open. See [the browser pairing flow](docs/planning/browser-device-pairing.md).
 
 ## Messaging (preview)

@@ -35,8 +35,11 @@ including revoked ones, and offers:
   optional built-in browser scanner (`/pair/scan`), or a shared link.
 - **Sperren:** requires a current guardian session, the session CSRF token,
   explicit confirmation and active, child-scoped device-management permission.
-  Revocation is checked by subsequent `ActiveDevice` calls. Existing
-  future device sessions must also be invalidated in the actual messenger.
+  Revocation is checked by subsequent `ActiveDevice` calls; child device
+  sessions re-check it on every request.
+- **Gerät verloren?:** opens the [lost-device page](device-lost.md), where
+  a guardian locks one or all devices of the child and reads what a lock
+  does and does not do.
 
 All guardian and tenant identifiers are obtained from the authenticated
 session, not the request. The backend checks authorization again for list,

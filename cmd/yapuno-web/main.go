@@ -137,6 +137,11 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 		}
 		mux.Handle("/family/devices", deviceRoutes)
 		mux.Handle("/family/devices/", deviceRoutes)
+		lostRoutes, err := familyweb.NewLostDevicePages(auth, opt.pairing, store, looks)
+		if err != nil {
+			return nil, err
+		}
+		mux.Handle("/family/devices/lost", lostRoutes)
 		childRoutes, err := pairingweb.New(opt.pairing)
 		if err != nil {
 			return nil, err
