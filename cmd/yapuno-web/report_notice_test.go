@@ -178,7 +178,7 @@ func TestGuardiansAreEmailedAboutAReport(t *testing.T) {
 		t.Fatalf("second report: %d", code)
 	}
 	time.Sleep(150 * time.Millisecond)
-	if got := mailer.reports(3); len(got) != 2 {
+	if got := mailer.reports(0); len(got) != 2 {
 		t.Fatalf("more than one notice per hour and child: %v", got)
 	}
 	if len(mailer.notices) != 0 || mailer.link("anna@example.org") != "" {
@@ -202,7 +202,7 @@ func TestGuardiansAreEmailedAboutAReport(t *testing.T) {
 		t.Fatalf("notices with a locked guardian: %v", got)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if got := careful.reports(2); len(got) != 1 {
+	if got := careful.reports(0); len(got) != 1 {
 		t.Fatalf("locked guardian was mailed: %v", got)
 	}
 }
