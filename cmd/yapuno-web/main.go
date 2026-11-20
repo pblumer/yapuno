@@ -27,6 +27,7 @@ import (
 	"github.com/pblumer/yapuno/internal/guardianlogin"
 	"github.com/pblumer/yapuno/internal/guardianmailer"
 	"github.com/pblumer/yapuno/internal/guardiansession"
+	"github.com/pblumer/yapuno/internal/messages"
 	"github.com/pblumer/yapuno/internal/pairingweb"
 )
 
@@ -53,11 +54,33 @@ type optionalStores struct {
 	pairing    *devicepairing.Store
 	appearance *appearance.Store
 	contacts   *contacts.Store
+	messages   *messages.Store
+}
+
+// purgingContacts deletes the messages of a contact from disk as soon as a
+// guardian ends that contact. Access already stops with the removal itself;
+// a failed purge is retried by the next compaction.
+type purgingContacts struct {
+	*contacts.Store
+	messages *messages.Store
+}
+
+func (p purgingContacts) Remove(guardianID, tenantID, childID, linkID string) error {
+	if err := p.Store.Remove(guardianID, tenantID, childID, linkID); err != nil {
+		return err
+	}
+	if err := p.messages.Compact(); err != nil {
+		log.Printf("message purge after contact removal failed; it will be retried at the next compaction")
+	}
+	return nil
 }
 
 func newHandler(origin string, store *familystore.Store, directory *guardiandirectory.Directory, sender guardianlogin.Sender, sessions *guardiansession.Manager, opt optionalStores) (http.Handler, error) {
 	if store == nil || directory == nil || sender == nil || sessions == nil {
 		return nil, errors.New("missing trusted Yapuno dependency")
+	}
+	if opt.messages != nil && (opt.contacts == nil || opt.pairing == nil) {
+		return nil, errors.New("messaging requires the contact and pairing stores")
 	}
 	login, err := guardianlogin.New(guardianlogin.Config{Origin: origin, Directory: directory, Sender: sender, Sessions: sessions, Now: time.Now})
 	if err != nil {
@@ -93,7 +116,11 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 		mux.Handle("/family/look", lookRoutes)
 	}
 	if opt.contacts != nil {
-		contactRoutes, err := familyweb.NewContactPages(auth, opt.contacts, store, looks)
+		var contactStore familyweb.ContactStore = opt.contacts
+		if opt.messages != nil {
+			contactStore = purgingContacts{Store: opt.contacts, messages: opt.messages}
+		}
+		contactRoutes, err := familyweb.NewContactPages(auth, contactStore, store, looks)
 		if err != nil {
 			return nil, err
 		}
@@ -126,6 +153,9 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 		if opt.appearance != nil {
 			childOptions.Looks = opt.appearance
 		}
+		if opt.messages != nil {
+			childOptions.Messages = opt.messages
+		}
 		childPages, err := childweb.New(childSessions, store, childOptions)
 		if err != nil {
 			return nil, err
@@ -151,6 +181,7 @@ func main() {
 	guardiansPath := flag.String("guardians", os.Getenv("YAPUNO_GUARDIANS_FILE"), "offline-provisioned guardian identity file (0600)")
 	pairingPath := flag.String("pairing", os.Getenv("YAPUNO_PAIRING_FILE"), "optional private device pairing file")
 	contactsPath := flag.String("contacts", os.Getenv("YAPUNO_CONTACTS_FILE"), "optional private file for guardian-approved contacts")
+	messagesPath := flag.String("messages", os.Getenv("YAPUNO_MESSAGES_FILE"), "optional private message log; requires pairing and contacts")
 	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
 	flag.Parse()
 	host, _, err := net.SplitHostPort(*listen)
@@ -189,6 +220,17 @@ func main() {
 			log.Fatal("contact store unavailable or insecure")
 		}
 	}
+	var messageStore *messages.Store
+	if *messagesPath != "" {
+		if contactStore == nil || pairingStore == nil {
+			log.Fatal("YAPUNO_MESSAGES_FILE requires YAPUNO_CONTACTS_FILE and YAPUNO_PAIRING_FILE")
+		}
+		messageStore, err = messages.Open(*messagesPath, contactStore, pairingStore, store, time.Now)
+		if err != nil {
+			log.Fatal("message store unavailable, insecure or corrupt")
+		}
+		defer messageStore.Close()
+	}
 	smtpPort := 465
 	sender, err := guardianmailer.New(guardianmailer.Config{
 		Host: os.Getenv("YAPUNO_SMTP_HOST"), Port: smtpPort,
@@ -202,7 +244,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	handler, err := newHandler(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore})
+	handler, err := newHandler(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}

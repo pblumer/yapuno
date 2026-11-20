@@ -60,6 +60,8 @@ type Looks interface {
 type Options struct {
 	Contacts Contacts
 	Looks    Looks
+	// Messages enables chats. It requires Contacts, which names the peer.
+	Messages Messages
 }
 
 type handler struct {
@@ -73,6 +75,9 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 	if sessions == nil || children == nil {
 		return nil, errors.New("child sessions and child directory are required")
 	}
+	if opt.Messages != nil && opt.Contacts == nil {
+		return nil, errors.New("messaging requires the contact store")
+	}
 	h := &handler{sessions: sessions, children: children, opt: opt}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /child", h.home)
@@ -81,6 +86,14 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 	mux.HandleFunc("POST /child/session/challenge", h.challenge)
 	mux.HandleFunc("POST /child/session/login", h.login)
 	mux.HandleFunc("POST /child/session/logout", h.logout)
+	if opt.Messages != nil {
+		mux.HandleFunc("GET /child/chat.js", h.asset(chatJS))
+		mux.HandleFunc("GET /child/chat-utils.js", h.asset(chatUtilsJS))
+		mux.HandleFunc("GET /child/chat/{id}", h.chat)
+		mux.HandleFunc("POST /child/chat/{id}/send", h.sendForm)
+		mux.HandleFunc("GET /child/chat/{id}/messages", h.historyJSON)
+		mux.HandleFunc("POST /child/chat/{id}/messages", h.sendJSON)
+	}
 	return mux, nil
 }
 
@@ -230,6 +243,10 @@ const homeCSS = `body{margin:0}
 .yp-muted{color:var(--yp-text-muted);margin:.4rem 0}
 .yp-crew{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.6rem}
 .yp-crew li{display:flex;align-items:center;gap:.8rem;min-height:64px;padding:.7rem .9rem;border-radius:var(--yp-radius);background:var(--yp-surface);border:var(--yp-bubble-border);box-shadow:var(--yp-bubble-shadow);font-weight:700;overflow-wrap:anywhere}
+.yp-crew li:has(a){padding:0}
+.yp-crew a{flex:1;display:flex;align-items:center;gap:.8rem;min-height:64px;padding:.7rem .9rem;border-radius:var(--yp-radius);color:var(--yp-text);text-decoration:none}
+.yp-crew a:focus-visible{outline:3px solid var(--yp-focus);outline-offset:2px}
+.yp-go{margin-left:auto;color:var(--yp-accent-text);font-size:1.4rem}
 .yp-initial{flex:none;display:grid;place-items:center;width:44px;height:44px;border-radius:50%;background:var(--yp-accent);color:var(--yp-on-accent);font-weight:800}
 .yp-empty{padding:1rem;border:2px dashed var(--yp-line);border-radius:var(--yp-radius);color:var(--yp-text-muted)}
 .yp-note{margin-top:1.6rem;padding:1rem;border-radius:var(--yp-radius);background:var(--yp-surface)}
@@ -244,15 +261,16 @@ var homePage = template.Must(template.New("child-home").Parse(`<!doctype html><h
 <h1>Hoi {{.Name}}!</h1>
 <p class="yp-muted">Schön, dass du da bist.</p>
 <h2>Deine Crew</h2>
-{{if .Crew}}<ul class="yp-crew">{{range .Crew}}<li><span class="yp-initial" aria-hidden="true">{{.Initial}}</span><span>{{.Name}}</span></li>{{end}}</ul>{{else}}<p class="yp-empty">Noch niemand in deiner Crew. Deine Eltern können dich mit anderen Kindern verbinden.</p>{{end}}
+{{if .Crew}}<ul class="yp-crew">{{range .Crew}}<li>{{if .Chat}}<a href="/child/chat/{{.Chat}}"><span class="yp-initial" aria-hidden="true">{{.Initial}}</span><span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a>{{else}}<span class="yp-initial" aria-hidden="true">{{.Initial}}</span><span>{{.Name}}</span>{{end}}</li>{{end}}</ul>{{else}}<p class="yp-empty">Noch niemand in deiner Crew. Deine Eltern können dich mit anderen Kindern verbinden.</p>{{end}}
 <p class="yp-muted">In deiner Crew sind nur Kinder, denen beide Familien zugestimmt haben. Fremde können dich nicht finden.</p>
-<p class="yp-note">Nachrichten schreiben kommt bald. Das hier ist eine Vorschau.</p>
+<p class="yp-note">{{if .Chats}}Tippe auf einen Namen, um zu schreiben. Das hier ist eine Vorschau.{{else}}Nachrichten schreiben kommt bald. Das hier ist eine Vorschau.{{end}}</p>
 <form method="post" action="/child/session/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit">Auf diesem Gerät abmelden</button></form>
 </div></main></body></html>`))
 
 type crewMember struct {
 	Name    string
 	Initial string
+	Chat    string // conversation id when messaging is enabled
 }
 
 func (h *handler) home(w http.ResponseWriter, r *http.Request) {
@@ -289,7 +307,11 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 				initial = strings.ToUpper(string(r))
 				break
 			}
-			crew = append(crew, crewMember{Name: c.Name, Initial: initial})
+			member := crewMember{Name: c.Name, Initial: initial}
+			if h.opt.Messages != nil {
+				member.Chat = c.ID
+			}
+			crew = append(crew, member)
 		}
 	}
 	decls := strings.TrimSuffix(strings.TrimPrefix(tokens, ":root{"), "}")
@@ -300,11 +322,12 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 		CSS              template.CSS
 		Figure           template.HTML
 		Crew             []crewMember
+		Chats            bool
 	}{
 		Skin: def.ID, Name: name, CSRF: s.CSRFToken,
 		// Validated first-party skin tokens and fixed component rules only.
 		CSS:    template.CSS(".yp-child{" + decls + "}\n" + homeCSS),
-		Figure: figure, Crew: crew,
+		Figure: figure, Crew: crew, Chats: h.opt.Messages != nil,
 	})
 }
 

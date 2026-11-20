@@ -34,8 +34,10 @@ jobs:
           node --check internal/familyweb/qrcode.vendor.js
           node --check internal/childweb/app.js
           node --check internal/childweb/sig-utils.js
+          node --check internal/childweb/chat.js
+          node --check internal/childweb/chat-utils.js
       - name: QR scanner and offline generator tests
-        run: node --test internal/pairingweb/scan_utils.test.cjs internal/familyweb/qr_render.test.cjs internal/childweb/sig_utils.test.cjs
+        run: node --test internal/pairingweb/scan_utils.test.cjs internal/familyweb/qr_render.test.cjs internal/childweb/sig_utils.test.cjs internal/childweb/chat_utils.test.cjs
       - name: Build
         run: go build ./...
       - name: Vet

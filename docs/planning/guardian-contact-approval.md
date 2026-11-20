@@ -1,6 +1,6 @@
 # Guardian contact approval — browser preview
 
-**Status:** engineering preview for synthetic child profiles. Guardians of two families can connect two children through a one-time code and both families' approval. **No messages can be sent yet**, children have no sessions, and there is no child-facing contact list. Decision record: [ADR draft: contact invitations](../adr/draft-contact-invitations.md).
+**Status:** engineering preview for synthetic child profiles. Guardians of two families can connect two children through a one-time code and both families' approval. Children see approved contacts on their own device and, when the message store is enabled, can write to them ([messaging preview](messaging-preview.md)). Decision record: [ADR draft: contact invitations](../adr/draft-contact-invitations.md).
 
 ## Enable the contact pages
 
@@ -37,7 +37,7 @@ The file is created with mode `0600` on first use. Without `YAPUNO_CONTACTS_FILE
 - No notification to co-guardians, no audit history, no rate limiting, single server process.
 - Deleted records leave no trace; retention and incident evidence are open (#7).
 - Guardian ↔ child and adult ↔ adult contacts (#12), groups and child-side block/report are not implemented.
-- Messaging (#4) must add device, session and per-operation checks before using `contacts.Store.Allowed`.
+- Messaging authorizes every send and read from the stored grant (`contacts.Store.Grant`) together with device and profile state; see the [messaging preview](messaging-preview.md).
 
 ## MFE evidence (headless Chromium, not a physical device)
 

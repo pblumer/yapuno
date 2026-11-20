@@ -69,7 +69,8 @@ type Party struct {
 
 func (p Party) valid() bool { return p.TenantID != "" && p.ChildID != "" }
 
-func (p Party) participant() authz.Participant {
+// Participant expresses the child as a tenant-qualified chat participant.
+func (p Party) Participant() authz.Participant {
 	return authz.Participant{TenantID: p.TenantID, ID: p.ChildID, Kind: authz.ParticipantChild}
 }
 
@@ -94,6 +95,15 @@ type link struct {
 	Invitee Party     `json:"invitee"`
 	Active  bool      `json:"active"`
 	Expires time.Time `json:"expires"` // pending requests only
+}
+
+// grant expresses the link as the consent record the authz predicates expect.
+// The invitee approved by redeeming; the inviter approves by confirming.
+func (l link) grant() authz.ContactGrant {
+	return authz.ContactGrant{
+		First: l.Inviter.Participant(), Second: l.Invitee.Participant(),
+		FirstApproved: l.Active, SecondApproved: true, Active: l.Active,
+	}
 }
 
 func (l link) involves(p Party) bool { return l.Inviter == p || l.Invitee == p }
@@ -471,6 +481,37 @@ func (s *Store) ContactsOf(p Party) []Entry {
 	return out
 }
 
+// Exists reports whether a relationship with this id is still stored (active,
+// or pending and unexpired). It reveals nothing about who is involved and is
+// meant for housekeeping, such as purging messages of ended contacts.
+func (s *Store) Exists(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.find(id)
+	return i >= 0 && s.live(s.state.Links[i])
+}
+
+// Grant returns the stored consent record of one relationship and the other
+// party, but only when self is one of its two parties. It does not decide
+// anything: callers apply authz.CanSendMessage or authz.CanReadConversation.
+// An expired pending request is reported as absent.
+func (s *Store) Grant(id string, self Party) (Party, authz.ContactGrant, bool) {
+	if !self.valid() {
+		return Party{}, authz.ContactGrant{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.find(id)
+	if i < 0 {
+		return Party{}, authz.ContactGrant{}, false
+	}
+	l := s.state.Links[i]
+	if !l.involves(self) || !s.live(l) {
+		return Party{}, authz.ContactGrant{}, false
+	}
+	return l.other(self), l.grant(), true
+}
+
 // Allowed reports whether two children are mutually approved contacts right
 // now. It authorizes the relationship only: device approval, sender status
 // and per-operation checks remain separate (see authz.CanContact).
@@ -484,11 +525,7 @@ func (s *Store) Allowed(a, b Party) bool {
 		if !l.joins(a, b) {
 			continue
 		}
-		grant := authz.ContactGrant{
-			First: l.Inviter.participant(), Second: l.Invitee.participant(),
-			FirstApproved: l.Active, SecondApproved: true, Active: l.Active,
-		}
-		return authz.CanContact(grant, a.participant(), b.participant()) && s.exists(a) && s.exists(b)
+		return authz.CanContact(l.grant(), a.Participant(), b.Participant()) && s.exists(a) && s.exists(b)
 	}
 	return false
 }
