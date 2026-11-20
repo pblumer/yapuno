@@ -21,7 +21,7 @@ Never permit a skin to modify authorization, consent, contact approval, privacy 
 
 ## Next slices
 - Self-hosted, license-checked font files (until then system fonts render)
-- Per-identity persisted preferences, guardian age-appropriate restrictions and a theme picker
+- Guardian age-appropriate restrictions and child access to the picker (guardian preview of persisted preferences and the "Mein Look" picker: see [Mein Look](mein-look.md))
 - Enumerated component slots for layout variants
 - High-contrast mode, dynamic type beyond 20 px, responsive visual regression
 - Manifest import/export and schema migration tooling

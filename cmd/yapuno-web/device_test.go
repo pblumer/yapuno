@@ -46,7 +46,7 @@ func TestOptionalGuardianDeviceRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := newHandler("https://app.example.org", families, guardians, &fakeMailer{}, sessions, devices)
+	handler, err := newHandler("https://app.example.org", families, guardians, &fakeMailer{}, sessions, optionalStores{pairing: devices})
 	if err != nil {
 		t.Fatal(err)
 	}

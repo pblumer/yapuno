@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/pblumer/yapuno/internal/appearance"
 	"github.com/pblumer/yapuno/internal/familydashboard"
 	"github.com/pblumer/yapuno/internal/familystore"
 )
@@ -35,13 +36,23 @@ type FamilyStore interface {
 // New builds a fail-closed handler. It is not a complete application: a real
 // authenticator, secure cookies, HTTPS and account provisioning are required.
 func New(auth Authenticator, store FamilyStore, enableDevicePages ...bool) (http.Handler, error) {
+	return newFamily(auth, store, nil, len(enableDevicePages) != 0 && enableDevicePages[0])
+}
+
+// NewWithAppearance additionally applies the guardian's saved look and links
+// the profile figure to the "Mein Look" page served by NewLookPages.
+func NewWithAppearance(auth Authenticator, store FamilyStore, looks AppearanceStore, enableDevicePages bool) (http.Handler, error) {
+	if looks == nil {
+		return nil, errors.New("appearance store is required")
+	}
+	return newFamily(auth, store, looks, enableDevicePages)
+}
+
+func newFamily(auth Authenticator, store FamilyStore, looks AppearanceStore, devices bool) (http.Handler, error) {
 	if auth == nil || store == nil {
 		return nil, errors.New("authenticator and store are required")
 	}
-	h := &handler{auth: auth, store: store}
-	if len(enableDevicePages) != 0 {
-		h.devicesEnabled = enableDevicePages[0]
-	}
+	h := &handler{auth: auth, store: store, looks: looks, devicesEnabled: devices}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /family", h.view)
 	mux.HandleFunc("POST /family/rename", h.rename)
@@ -51,6 +62,7 @@ func New(auth Authenticator, store FamilyStore, enableDevicePages ...bool) (http
 type handler struct {
 	auth  Authenticator
 	store FamilyStore
+	looks AppearanceStore
 
 	devicesEnabled bool
 }
@@ -79,13 +91,23 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cards := h.store.Cards(p.GuardianID, p.TenantID)
-	skinID := r.URL.Query().Get("skin")
-	fragment, err := familydashboard.RenderHTML(cards, skinID)
+	// ?skin= previews a skin for this request only; it never changes storage.
+	opts := familydashboard.Options{Skin: r.URL.Query().Get("skin")}
+	if h.looks != nil {
+		pref := h.looks.Get(guardianSubject(p))
+		if opts.Skin == "" {
+			opts.Skin = pref.Skin
+		}
+		if figure, err := appearance.FigureSVG(pref.Figure, 44); err == nil {
+			opts.Avatar, opts.ProfileHref = figure, "/family/look"
+		}
+	}
+	fragment, err := familydashboard.RenderHTMLWithOptions(cards, opts)
 	if err != nil {
 		http.Error(w, "Unable to display family", http.StatusInternalServerError)
 		return
 	}
-	const page = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno – Familie</title></head><body>{{.Fragment}}<section aria-label="Kinderprofile bearbeiten"><h2>Profile bearbeiten</h2>{{range .Cards}}{{if and .Permissions.ManageDevices .Permissions.ApproveContacts}}<form method="post" action="/family/rename"><label>Neuer Name für {{.DisplayName}}<input name="name" value="{{.DisplayName}}" required maxlength="40"></label><input type="hidden" name="child_id" value="{{.ID}}"><input type="hidden" name="csrf_token" value="{{$.Token}}"><button type="submit">Speichern</button></form>{{end}}{{if and $.DevicesEnabled .Permissions.ManageDevices}}<p><a href="/family/devices?child_id={{.ID}}">Geräte verwalten</a></p>{{end}}{{end}}</section></body></html>`
+	const page = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno – Familie</title></head><body>{{.Fragment}}{{if .LookEnabled}}<p><a href="/family/look">Mein Look ändern</a></p>{{end}}<section aria-label="Kinderprofile bearbeiten"><h2>Profile bearbeiten</h2>{{range .Cards}}{{if and .Permissions.ManageDevices .Permissions.ApproveContacts}}<form method="post" action="/family/rename"><label>Neuer Name für {{.DisplayName}}<input name="name" value="{{.DisplayName}}" required maxlength="40"></label><input type="hidden" name="child_id" value="{{.ID}}"><input type="hidden" name="csrf_token" value="{{$.Token}}"><button type="submit">Speichern</button></form>{{end}}{{if and $.DevicesEnabled .Permissions.ManageDevices}}<p><a href="/family/devices?child_id={{.ID}}">Geräte verwalten</a></p>{{end}}{{end}}</section></body></html>`
 	t, err := template.New("page").Parse(page)
 	if err != nil {
 		http.Error(w, "Unable to display family", http.StatusInternalServerError)
@@ -98,7 +120,8 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 		Fragment template.HTML
 
 		DevicesEnabled bool
-	}{Token: p.CSRFToken, Cards: cards, Fragment: template.HTML(fragment), DevicesEnabled: h.devicesEnabled}); err != nil {
+		LookEnabled    bool
+	}{Token: p.CSRFToken, Cards: cards, Fragment: template.HTML(fragment), DevicesEnabled: h.devicesEnabled, LookEnabled: h.looks != nil}); err != nil {
 		return
 	}
 }

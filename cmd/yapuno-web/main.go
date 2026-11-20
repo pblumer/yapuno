@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pblumer/yapuno/internal/appearance"
 	"github.com/pblumer/yapuno/internal/devicepairing"
 	"github.com/pblumer/yapuno/internal/familystore"
 	"github.com/pblumer/yapuno/internal/familyweb"
@@ -44,7 +45,13 @@ func (v verifiedSessions) Authenticate(r *http.Request) (familyweb.Session, erro
 	return session, nil
 }
 
-func newHandler(origin string, store *familystore.Store, directory *guardiandirectory.Directory, sender guardianlogin.Sender, sessions *guardiansession.Manager, pairing ...*devicepairing.Store) (http.Handler, error) {
+// optionalStores enables optional preview features when configured.
+type optionalStores struct {
+	pairing    *devicepairing.Store
+	appearance *appearance.Store
+}
+
+func newHandler(origin string, store *familystore.Store, directory *guardiandirectory.Directory, sender guardianlogin.Sender, sessions *guardiansession.Manager, opt optionalStores) (http.Handler, error) {
 	if store == nil || directory == nil || sender == nil || sessions == nil {
 		return nil, errors.New("missing trusted Yapuno dependency")
 	}
@@ -52,7 +59,13 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 	if err != nil {
 		return nil, err
 	}
-	family, err := familyweb.New(verifiedSessions{sessions: sessions, directory: directory}, store, len(pairing) != 0 && pairing[0] != nil)
+	auth := verifiedSessions{sessions: sessions, directory: directory}
+	var family http.Handler
+	if opt.appearance != nil {
+		family, err = familyweb.NewWithAppearance(auth, store, opt.appearance, opt.pairing != nil)
+	} else {
+		family, err = familyweb.New(auth, store, opt.pairing != nil)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -66,14 +79,21 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 	mux.Handle("/login/", loginRoutes)
 	mux.Handle("/family", familyRoutes)
 	mux.Handle("/family/", familyRoutes)
-	if len(pairing) != 0 && pairing[0] != nil {
-		deviceRoutes, err := familyweb.NewDevicePages(verifiedSessions{sessions: sessions, directory: directory}, pairing[0], origin)
+	if opt.appearance != nil {
+		lookRoutes, err := familyweb.NewLookPages(auth, opt.appearance)
+		if err != nil {
+			return nil, err
+		}
+		mux.Handle("/family/look", lookRoutes)
+	}
+	if opt.pairing != nil {
+		deviceRoutes, err := familyweb.NewDevicePages(auth, opt.pairing, origin)
 		if err != nil {
 			return nil, err
 		}
 		mux.Handle("/family/devices", deviceRoutes)
 		mux.Handle("/family/devices/", deviceRoutes)
-		childRoutes, err := pairingweb.New(pairing[0])
+		childRoutes, err := pairingweb.New(opt.pairing)
 		if err != nil {
 			return nil, err
 		}
@@ -97,6 +117,7 @@ func main() {
 	storePath := flag.String("families", os.Getenv("YAPUNO_FAMILIES_FILE"), "durable family state file")
 	guardiansPath := flag.String("guardians", os.Getenv("YAPUNO_GUARDIANS_FILE"), "offline-provisioned guardian identity file (0600)")
 	pairingPath := flag.String("pairing", os.Getenv("YAPUNO_PAIRING_FILE"), "optional private device pairing file")
+	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
 	flag.Parse()
 	host, _, err := net.SplitHostPort(*listen)
 	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
@@ -120,6 +141,13 @@ func main() {
 			log.Fatal("device pairing store unavailable or insecure")
 		}
 	}
+	var appearanceStore *appearance.Store
+	if *appearancePath != "" {
+		appearanceStore, err = appearance.Open(*appearancePath)
+		if err != nil {
+			log.Fatal("appearance store unavailable or insecure")
+		}
+	}
 	smtpPort := 465
 	sender, err := guardianmailer.New(guardianmailer.Config{
 		Host: os.Getenv("YAPUNO_SMTP_HOST"), Port: smtpPort,
@@ -133,7 +161,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	handler, err := newHandler(*origin, store, directory, sender, sessions, pairingStore)
+	handler, err := newHandler(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}

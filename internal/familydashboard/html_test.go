@@ -1,6 +1,7 @@
 package familydashboard
 
 import (
+	"html/template"
 	"regexp"
 	"strings"
 	"testing"
@@ -91,5 +92,32 @@ func TestRenderHTMLUsesOnlyDeclaredSkinTokens(t *testing.T) {
 				t.Errorf("hard-coded color in component rules: %v", hex.FindAllString(rest, -1))
 			}
 		})
+	}
+}
+
+func TestRenderHTMLWithFigureLinksToProfile(t *testing.T) {
+	figure := template.HTML(`<svg aria-hidden="true" focusable="false" width="42" height="42"></svg>`)
+	html, err := RenderHTMLWithOptions(nil, Options{Skin: "vivid", Avatar: figure, ProfileHref: "/family/look"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`data-yp-skin="vivid"`, `href="/family/look"`, `aria-label="Mein Look"`, string(figure)} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	unsafe, err := RenderHTMLWithOptions(nil, Options{Skin: "classic", Avatar: figure, ProfileHref: "javascript:alert(1)"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(unsafe, "javascript:") {
+		t.Fatal("unsafe profile link rendered")
+	}
+	plain, err := RenderHTML(nil, "classic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain, "<svg") || strings.Contains(plain, "/family/look") {
+		t.Fatal("figure or profile link rendered without options")
 	}
 }
