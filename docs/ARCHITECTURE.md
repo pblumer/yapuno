@@ -41,7 +41,7 @@ Encryption in transit and at rest are required for any real pilot; a server that
 `internal/authz/` initially contains a **pure policy predicate only**; it is not a complete authorization system. All inputs in that package must originate in trusted data access, never directly from the client.
 
 ## Status and decisions
-Draft ADRs cover Go/dependency choices, guardian trust boundaries, MFE and safety/retention. Data store, E2EE, login guarantees and legal scope are intentionally not settled yet. No service endpoints, frontend or message persistence exist yet.
+Draft ADRs cover Go/dependency choices, guardian trust boundaries, MFE, safety/retention, contact invitations, child device sessions and message storage. Data store, E2EE, realtime transport, retention and legal scope are intentionally not settled yet. Guardian pages, child device sessions and one-to-one messaging exist as **engineering previews for synthetic profiles** on file-based, single-process stores (see the [roadmap](../ROADMAP.md)); none of it is production-ready.
 
 ## Future capability proposal: Communities & Classrooms (not implemented)
 An optional `Community > Cohort (e.g. class/year) > Room` boundary may serve parent-led class groups and eventually verified school organizations. The principal remains in its authoritative home family/tenant; narrowly scoped cross-family **community membership** must not weaken that boundary or automatically create personal contacts. Parent authority, membership, room role, device and direct-contact grant are independent checks. Official school staff and school operator roles will require independent verification, privacy/legal review and explicit delegation.

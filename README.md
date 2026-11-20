@@ -4,7 +4,7 @@
 
 A **Mobile First Experience (MFE)**: Yapuno is a proposed private, parent-approved chat space for children and teens, designed for iPhone and Android with Wi-Fi/internet access. No child-managed passwords, phone numbers, SIMs or public profiles.
 
-> **Early prototype — NOT approved for real children's use.** No production authentication, messaging, moderation or child-safety safeguards are implemented yet. An independent safety, privacy and mobile usability review is required before any real pilot.
+> **Early prototype — NOT approved for real children's use.** Authentication and messaging exist only as engineering previews for synthetic profiles; no moderation, reporting or production child-safety safeguards are implemented. An independent safety, privacy and mobile usability review is required before any real pilot.
 
 ## First Hello
 The first goal is a simple conversation between two children on approved devices, after **both sides' guardian contact approvals**, with server-enforced tenant boundaries and device revocation.
@@ -52,12 +52,23 @@ can view linked devices, start five-minute pairing challenges and revoke devices
 for their authorized children. See the [setup and limitations](docs/planning/guardian-device-management.md).
 **Browser key-based child enrollment and explicit guardian fingerprint approval are now wired** using a short-lived invitation link. **Locally rendered QR images and a child scanner page** are now included. The scanner supports the browser's BarcodeDetector where available, otherwise the native phone camera or a shared link. Messaging authorization and real iPhone/Android tests are still open. See [the browser pairing flow](docs/planning/browser-device-pairing.md).
 
+## Messaging (preview)
+
+With `YAPUNO_MESSAGES_FILE` (plus pairing and contacts), two children whose
+families approved the contact can exchange text messages from their paired
+devices. Every send and read is authorized from current contact, profile and
+device state; retries are idempotent; a message is confirmed only after it is
+on disk. Guardians cannot read messages. **Messages are stored in plaintext,
+there is no reporting or blocking yet, and this must not be used with real
+children.** See [the preview and its limits](docs/planning/messaging-preview.md)
+and the [proposed ADR](docs/adr/draft-message-storage.md).
+
 ## Child device sessions (preview)
 
 A paired device signs in at `/child` without a password by proving possession
 of the key bound during pairing, and receives a 12-hour session that ends when
 a guardian revokes the device. The child sees a greeting and the contacts both
-families approved. **Messaging does not exist yet.** The key is non-extractable
+families approved. The key is non-extractable
 but not hardware-backed. See [the flow and limitations](docs/planning/child-device-sessions.md)
 and the [proposed ADR](docs/adr/draft-child-device-sessions.md).
 
@@ -67,8 +78,7 @@ When the optional `YAPUNO_CONTACTS_FILE` is configured, guardians of two
 families can connect two children: one family creates a one-time code, the
 other redeems it for their child, and the first family confirms the named
 request. Only then is the contact active; either family can end it. There is
-no directory or search. **Messaging does not exist yet**, so this only records
-the approved relationship. See [the flow and limitations](docs/planning/guardian-contact-approval.md)
+no directory or search. See [the flow and limitations](docs/planning/guardian-contact-approval.md)
 and the [proposed ADR](docs/adr/draft-contact-invitations.md).
 
 ## Mein Look (preview)

@@ -718,3 +718,60 @@ func TestContactsOfListsOnlyActiveContactsOfThatChild(t *testing.T) {
 		}
 	}
 }
+
+// Grant feeds the messaging predicate: it exposes the stored consent record
+// of one relationship, but only to a party that is part of it.
+func TestGrantIsOnlyVisibleToItsTwoParties(t *testing.T) {
+	f := setup(t)
+	code, err := f.store.Invite("anna", lea.TenantID, lea.ChildID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := f.store.Redeem("bruno", mia.TenantID, mia.ChildID, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, grant, ok := f.store.Grant(id, lea)
+	if !ok || peer != mia || grant.Active || authz.CanContact(grant, lea.Participant(), mia.Participant()) {
+		t.Fatalf("pending request must yield an inactive grant: %+v %v", grant, ok)
+	}
+	if err := f.store.Confirm("anna", lea.TenantID, lea.ChildID, id); err != nil {
+		t.Fatal(err)
+	}
+	for self, want := range map[Party]Party{lea: mia, mia: lea} {
+		peer, grant, ok := f.store.Grant(id, self)
+		if !ok || peer != want || !authz.CanContact(grant, self.Participant(), peer.Participant()) {
+			t.Fatalf("%+v: peer %+v grant %+v ok %v", self, peer, grant, ok)
+		}
+	}
+	for _, outsider := range []Party{tim, noah, {}, {TenantID: "family-b", ChildID: "lea"}} {
+		if _, _, ok := f.store.Grant(id, outsider); ok {
+			t.Fatalf("grant visible to %+v", outsider)
+		}
+	}
+	for _, bad := range []string{"", "unknown", id + "0"} {
+		if _, _, ok := f.store.Grant(bad, lea); ok {
+			t.Fatalf("grant found for id %q", bad)
+		}
+	}
+	if err := f.store.Remove("bruno", mia.TenantID, mia.ChildID, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := f.store.Grant(id, lea); ok {
+		t.Fatal("grant survives removal")
+	}
+}
+
+func TestExistsFollowsTheRelationshipLifecycle(t *testing.T) {
+	f := setup(t)
+	id := f.connect(t)
+	if !f.store.Exists(id) || f.store.Exists("") || f.store.Exists("unknown") {
+		t.Fatal("unexpected existence result")
+	}
+	if err := f.store.Remove("anna", lea.TenantID, lea.ChildID, id); err != nil {
+		t.Fatal(err)
+	}
+	if f.store.Exists(id) {
+		t.Fatal("removed relationship still exists")
+	}
+}

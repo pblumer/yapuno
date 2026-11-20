@@ -1,6 +1,6 @@
 # Child device sessions — browser preview
 
-**Status:** engineering preview for synthetic child profiles. A paired device can sign in without a password and sees a minimal home page with the child's name, figure and approved contacts. **No messages can be sent yet.** Decision record: [ADR draft: child device sessions](../adr/draft-child-device-sessions.md).
+**Status:** engineering preview for synthetic child profiles. A paired device can sign in without a password and sees a minimal home page with the child's name, figure and approved contacts. With the message store enabled, each contact opens a chat ([messaging preview](messaging-preview.md)). Decision record: [ADR draft: child device sessions](../adr/draft-child-device-sessions.md).
 
 ## Enable
 

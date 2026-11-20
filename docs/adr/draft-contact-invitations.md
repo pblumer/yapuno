@@ -47,7 +47,7 @@ Chosen option (if approved): **option 3**.
 `contacts.Store.Allowed(a, b)` is the authoritative relationship check for later messaging: the exact pair must be active and both child profiles must still exist.
 
 ### Not decided here
-- `authz.CanSendMessage` still requires one tenant for sender and recipient and therefore denies cross-family messages. It stays fail-closed until messaging (#4) revises it together with device and session checks.
+- Message authorization: at the time of this draft `authz.CanSendMessage` still required one tenant and denied cross-family messages. The [message storage draft](draft-message-storage.md) replaces it with a tenant-qualified predicate that takes this contact grant as input.
 - Adult participants and adult–child contacts (#12) reuse `Participant` and `ContactGrant` but need their own consent rules.
 - Group membership and circles.
 
