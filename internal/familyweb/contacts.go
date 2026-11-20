@@ -11,6 +11,7 @@ import (
 
 	"github.com/pblumer/yapuno/internal/appearance"
 	"github.com/pblumer/yapuno/internal/contacts"
+	"github.com/pblumer/yapuno/internal/fontassets"
 	"github.com/pblumer/yapuno/internal/skin"
 )
 
@@ -174,7 +175,8 @@ func (h *contactHandler) css(p Session) (string, template.CSS, error) {
 		return "", "", err
 	}
 	// Only validated first-party skin tokens and fixed component rules.
-	return def.ID, template.CSS(".yp-page{" + decls + "}\n" + contactCSS), nil
+	fonts := fontassets.FaceCSS(def.Typography.Heading, def.Typography.Body)
+	return def.ID, template.CSS(fonts + ".yp-page{" + decls + "}\n" + contactCSS), nil
 }
 
 const contactHead = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Yapuno – Kontakte</title><style>{{.CSS}}</style></head><body><main class="yp-page" data-yp-skin="{{.Skin}}"><div class="yp-shell">`

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/pblumer/yapuno/internal/appearance"
+	"github.com/pblumer/yapuno/internal/fontassets"
 	"github.com/pblumer/yapuno/internal/skin"
 )
 
@@ -111,6 +112,7 @@ func pageCSS(look appearance.Preference, ids []string, catalog map[string]skin.D
 			savedHex = c.Hex
 		}
 	}
+	b.WriteString(fontassets.FaceCSS(fontassets.Keys()...))
 	b.WriteString(":root{" + current + "--yp-figure-fill:" + savedHex + ";}\n")
 	b.WriteString(baseCSS)
 	b.WriteString(".yp-preview .yp-fig-" + look.Figure.Shape + "{display:block}\n")

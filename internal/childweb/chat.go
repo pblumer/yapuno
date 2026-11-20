@@ -20,6 +20,7 @@ import (
 	"github.com/pblumer/yapuno/internal/appearance"
 	"github.com/pblumer/yapuno/internal/childsession"
 	"github.com/pblumer/yapuno/internal/contacts"
+	"github.com/pblumer/yapuno/internal/fontassets"
 	"github.com/pblumer/yapuno/internal/messages"
 	"github.com/pblumer/yapuno/internal/skin"
 )
@@ -166,7 +167,7 @@ func (h *handler) renderChat(w http.ResponseWriter, r *http.Request, s childsess
 		Skin: def.ID, Peer: peer, Conversation: conversationID, CSRF: s.CSRFToken, ClientID: clientID, Alert: alert, Draft: draft,
 		LastSeq: last, PeerFigure: h.peerFigure(self, conversationID),
 		// Validated first-party skin tokens and fixed component rules only.
-		CSS:      template.CSS(".yp-chat{" + decls + "}\n" + chatCSS),
+		CSS:      template.CSS(fontassets.FaceCSS(def.Typography.Heading, def.Typography.Body) + ".yp-chat{" + decls + "}\n" + chatCSS),
 		Messages: view,
 	})
 }

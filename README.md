@@ -88,5 +88,12 @@ and signed-in children (`/child/look`) each choose a theme and a photo-free
 figure. A theme is private; a child's figure is shown to mutually approved
 contacts only. See [Mein Look](docs/planning/mein-look.md).
 
+## Fonts
+
+Themes use four font families that are embedded in the binary and served from
+Yapuno's own origin; no page loads anything from a third party. All are under
+the SIL Open Font License 1.1. See [self-hosted fonts](docs/planning/self-hosted-fonts.md)
+and [`internal/fontassets/SOURCE.md`](internal/fontassets/SOURCE.md).
+
 ## Open source direction
 The repository is public. **A distribution license has not yet been selected; public visibility by itself does not confer a license to reuse the code.** We intend to choose and publish an appropriate OSI-approved license before accepting broader contributions or releasing an installable build.
