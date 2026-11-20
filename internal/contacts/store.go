@@ -95,6 +95,17 @@ type link struct {
 	Invitee Party     `json:"invitee"`
 	Active  bool      `json:"active"`
 	Expires time.Time `json:"expires"` // pending requests only
+	// A child may block an active contact. Each side records its own block;
+	// only a guardian of the blocking child lifts it.
+	InviterBlocked bool `json:"inviter_blocked,omitempty"`
+	InviteeBlocked bool `json:"invitee_blocked,omitempty"`
+}
+
+func (l link) blocked() bool { return l.InviterBlocked || l.InviteeBlocked }
+
+// blockedBy reports whether this party itself blocked the relationship.
+func (l link) blockedBy(p Party) bool {
+	return (l.Inviter == p && l.InviterBlocked) || (l.Invitee == p && l.InviteeBlocked)
 }
 
 // grant expresses the link as the consent record the authz predicates expect.
@@ -103,6 +114,7 @@ func (l link) grant() authz.ContactGrant {
 	return authz.ContactGrant{
 		First: l.Inviter.Participant(), Second: l.Invitee.Participant(),
 		FirstApproved: l.Active, SecondApproved: true, Active: l.Active,
+		Blocked: l.blocked(),
 	}
 }
 
@@ -402,6 +414,59 @@ func (s *Store) Remove(guardian, tenant, child, id string) error {
 	return s.commit(next)
 }
 
+// Block suspends one of the child's own active contacts for both children.
+// It performs no guardian check: the caller must have authenticated exactly
+// this child. Every failure looks the same, so ids cannot be probed. Blocking
+// again is harmless. Only a guardian of this child can lift the block.
+func (s *Store) Block(p Party, id string) error {
+	if !p.valid() {
+		return ErrNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.find(id)
+	if i < 0 || !s.exists(p) {
+		return ErrNotFound
+	}
+	l := s.state.Links[i]
+	if !l.Active || !l.involves(p) {
+		return ErrNotFound
+	}
+	if l.blockedBy(p) {
+		return nil
+	}
+	next := state{Invitations: s.state.Invitations, Links: append([]link(nil), s.state.Links...)}
+	if l.Inviter == p {
+		next.Links[i].InviterBlocked = true
+	} else {
+		next.Links[i].InviteeBlocked = true
+	}
+	return s.commit(next)
+}
+
+// Unblock lifts the block that this child set. A guardian with current
+// contact authority for this child may do so; a block set by the other child
+// is not touched.
+func (s *Store) Unblock(guardian, tenant, child, id string) error {
+	party := Party{TenantID: tenant, ChildID: child}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.allowed(guardian, party) {
+		return ErrForbidden
+	}
+	i := s.find(id)
+	if i < 0 || !s.state.Links[i].involves(party) || !s.state.Links[i].blockedBy(party) {
+		return ErrNotFound
+	}
+	next := state{Invitations: s.state.Invitations, Links: append([]link(nil), s.state.Links...)}
+	if next.Links[i].Inviter == party {
+		next.Links[i].InviterBlocked = false
+	} else {
+		next.Links[i].InviteeBlocked = false
+	}
+	return s.commit(next)
+}
+
 // Entry is one relationship as shown to a guardian. It deliberately carries
 // no tenant or child identifier of the other family.
 type Entry struct {
@@ -411,7 +476,9 @@ type Entry struct {
 
 // Overview lists one child's relationships for an authorized guardian.
 type Overview struct {
-	Contacts        []Entry // active
+	Contacts        []Entry // active and not blocked
+	Blocked         []Entry // blocked by this child; a guardian of this child may lift it
+	Paused          []Entry // blocked by the other child only
 	Incoming        []Entry // redeemed by the other family, awaiting our confirmation
 	Outgoing        []Entry // redeemed by us, awaiting the other family
 	OpenInvitations int
@@ -441,6 +508,10 @@ func (s *Store) Overview(guardian, tenant, child string) (Overview, error) {
 		}
 		entry := Entry{ID: l.ID, Name: name}
 		switch {
+		case l.Active && l.blockedBy(party):
+			view.Blocked = append(view.Blocked, entry)
+		case l.Active && l.blocked():
+			view.Paused = append(view.Paused, entry)
 		case l.Active:
 			view.Contacts = append(view.Contacts, entry)
 		case l.Inviter == party:
@@ -449,16 +520,27 @@ func (s *Store) Overview(guardian, tenant, child string) (Overview, error) {
 			view.Outgoing = append(view.Outgoing, entry)
 		}
 	}
-	for _, list := range [][]Entry{view.Contacts, view.Incoming, view.Outgoing} {
+	for _, list := range [][]Entry{view.Contacts, view.Blocked, view.Paused, view.Incoming, view.Outgoing} {
 		sort.Slice(list, func(i, j int) bool { return list[i].Name+list[i].ID < list[j].Name+list[j].ID })
 	}
 	return view, nil
 }
 
-// ContactsOf lists the active contacts of one child by display name. It
-// performs no guardian check: the caller must have authenticated this exact
-// child (for example through a child device session).
+// ContactsOf lists the active, unblocked contacts of one child by display
+// name. It performs no guardian check: the caller must have authenticated
+// this exact child (for example through a child device session).
 func (s *Store) ContactsOf(p Party) []Entry {
+	return s.listFor(p, func(l link) bool { return !l.blocked() })
+}
+
+// BlockedBy lists the contacts this child has blocked itself. Like
+// ContactsOf it is only for the authenticated child. A child never learns
+// from it that somebody else blocked them.
+func (s *Store) BlockedBy(p Party) []Entry {
+	return s.listFor(p, func(l link) bool { return l.blockedBy(p) })
+}
+
+func (s *Store) listFor(p Party, keep func(link) bool) []Entry {
 	if !p.valid() {
 		return nil
 	}
@@ -469,7 +551,7 @@ func (s *Store) ContactsOf(p Party) []Entry {
 	}
 	var out []Entry
 	for _, l := range s.state.Links {
-		if !l.Active || !l.involves(p) {
+		if !l.Active || !l.involves(p) || !keep(l) {
 			continue
 		}
 		other := l.other(p)

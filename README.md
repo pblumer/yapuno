@@ -4,7 +4,7 @@
 
 A **Mobile First Experience (MFE)**: Yapuno is a proposed private, parent-approved chat space for children and teens, designed for iPhone and Android with Wi-Fi/internet access. No child-managed passwords, phone numbers, SIMs or public profiles.
 
-> **Early prototype — NOT approved for real children's use.** Authentication and messaging exist only as engineering previews for synthetic profiles; no moderation, reporting or production child-safety safeguards are implemented. An independent safety, privacy and mobile usability review is required before any real pilot.
+> **Early prototype — NOT approved for real children's use.** Authentication and messaging exist only as engineering previews for synthetic profiles; a first block and report function exists as a preview, but no moderation, escalation or production child-safety safeguards are implemented. An independent safety, privacy and mobile usability review is required before any real pilot.
 
 ## First Hello
 The first goal is a simple conversation between two children on approved devices, after **both sides' guardian contact approvals**, with server-enforced tenant boundaries and device revocation.
@@ -69,9 +69,12 @@ With `YAPUNO_MESSAGES_FILE` (plus pairing and contacts), two children whose
 families approved the contact can exchange text messages from their paired
 devices. Every send and read is authorized from current contact, profile and
 device state; retries are idempotent; a message is confirmed only after it is
-on disk. Guardians cannot read messages. **Messages are stored in plaintext,
-there is no reporting or blocking yet, and this must not be used with real
-children.** See [the preview and its limits](docs/planning/messaging-preview.md)
+on disk. Guardians cannot read messages. A child can block a contact and, with
+`YAPUNO_REPORTS_FILE`, report one message to their own guardians, who then see
+exactly that message ([report and block](docs/planning/report-and-block.md),
+[proposed ADR](docs/adr/draft-report-and-block.md)). **Messages are stored in
+plaintext, there is no moderation or escalation, and this must not be used with
+real children.** See [the preview and its limits](docs/planning/messaging-preview.md)
 and the [proposed ADR](docs/adr/draft-message-storage.md).
 
 ## Child device sessions (preview)

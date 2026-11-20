@@ -57,7 +57,7 @@ Chosen option (if approved): **option 1 as a preview store**, with the interface
 ### What this does not provide
 - **No end-to-end encryption and no encryption at rest.** Message text is readable by the server process and by anyone with access to the data directory. Encryption at rest is required before any real pilot.
 - No delivery or read receipts; "sent" means stored by the server.
-- No reporting, blocking, moderation, link rules or guardian visibility.
+- No moderation, link rules or general guardian visibility. Block and single-message report are a separate proposal ([report and block ADR draft](draft-report-and-block.md)).
 - No push notifications, media, edits, deletes or groups.
 
 ### Consequences
@@ -66,7 +66,7 @@ Chosen option (if approved): **option 1 as a preview store**, with the interface
 - Open questions and review gates:
   - Storage ADR (PostgreSQL or SQLite), backups and how expiry reaches them.
   - Retention period, deletion on account removal, export, incident evidence holds (#7).
-  - Reporting and blocking by children before a pilot (MFE acceptance matrix).
+  - Reporting and blocking by children before a pilot (MFE acceptance matrix): first slice in the [report and block ADR draft](draft-report-and-block.md); evidence with children still required.
   - Realtime transport and its authorization during long-lived streams.
   - Encryption at rest, and whether end-to-end encryption is compatible with the safety model.
   - Abuse limits beyond the per-minute cap; storage quotas per family.

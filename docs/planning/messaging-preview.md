@@ -1,6 +1,6 @@
 # One-to-one messaging — browser preview
 
-**Status:** engineering preview for synthetic child profiles. Two children whose families approved the contact can exchange text messages from their paired devices. This is the first end-to-end "First Hello" path in code. **It is not safe for real children:** no reporting or blocking, no encryption at rest, no rate limiting beyond a per-minute cap, no real-device evidence. Decision record: [ADR draft: message storage](../adr/draft-message-storage.md).
+**Status:** engineering preview for synthetic child profiles. Two children whose families approved the contact can exchange text messages from their paired devices. This is the first end-to-end "First Hello" path in code. **It is not safe for real children:** only a first [report and block](report-and-block.md) slice without moderation, no encryption at rest, no rate limiting beyond a per-minute cap, no real-device evidence. Decision record: [ADR draft: message storage](../adr/draft-message-storage.md).
 
 ## Enable
 
@@ -45,7 +45,7 @@ One scripted run through the real server over TLS: both devices paired and signe
 ## Limitations
 
 - **Plaintext on the server and on disk.** No end-to-end encryption, no encryption at rest.
-- No reporting, blocking, moderation or link rules; these are required before a pilot.
+- Children can block a contact and report single messages to their own guardians ([report and block](report-and-block.md)). There is no moderation, escalation or link rule; these are required before a pilot.
 - Polling only; no push notifications, no realtime stream.
 - "Gesendet" means stored by the server, not delivered or read.
 - Retention (30 days, newest 2000 per conversation) and deletion rules are provisional (#7).
