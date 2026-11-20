@@ -31,6 +31,7 @@ import (
 	"github.com/pblumer/yapuno/internal/guardiansession"
 	"github.com/pblumer/yapuno/internal/messages"
 	"github.com/pblumer/yapuno/internal/pairingweb"
+	"github.com/pblumer/yapuno/internal/reports"
 )
 
 // verifiedSessions invalidates already-issued sessions when guardian identity
@@ -59,6 +60,8 @@ type optionalStores struct {
 	messages   *messages.Store
 	// guardianLocks enables the emergency lock of a guardian's own access.
 	guardianLocks *guardianlock.Store
+	// reports lets children report single messages to their own guardians.
+	reports *reports.Store
 }
 
 // purgingContacts deletes the messages of a contact from disk as soon as a
@@ -85,6 +88,9 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 	}
 	if opt.messages != nil && (opt.contacts == nil || opt.pairing == nil) {
 		return nil, errors.New("messaging requires the contact and pairing stores")
+	}
+	if opt.reports != nil && opt.messages == nil {
+		return nil, errors.New("reports require messaging")
 	}
 	var locker *guardianlock.Locker
 	if opt.guardianLocks != nil {
@@ -113,6 +119,9 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 	if opt.appearance != nil {
 		looks = opt.appearance
 		familyOptions.Looks = looks
+	}
+	if opt.reports != nil {
+		familyOptions.Reports = opt.reports
 	}
 	family, err := familyweb.NewWithOptions(auth, store, familyOptions)
 	if err != nil {
@@ -156,7 +165,12 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 		if opt.messages != nil {
 			contactStore = purgingContacts{Store: opt.contacts, messages: opt.messages}
 		}
-		contactRoutes, err := familyweb.NewContactPages(auth, contactStore, store, looks)
+		var contactRoutes http.Handler
+		if opt.reports != nil {
+			contactRoutes, err = familyweb.NewContactPagesWithReports(auth, contactStore, store, looks, opt.reports)
+		} else {
+			contactRoutes, err = familyweb.NewContactPages(auth, contactStore, store, looks)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -197,6 +211,9 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 		if opt.messages != nil {
 			childOptions.Messages = opt.messages
 		}
+		if opt.reports != nil {
+			childOptions.Reports = opt.reports
+		}
 		childPages, err := childweb.New(childSessions, store, childOptions)
 		if err != nil {
 			return nil, err
@@ -223,6 +240,7 @@ func main() {
 	pairingPath := flag.String("pairing", os.Getenv("YAPUNO_PAIRING_FILE"), "optional private device pairing file")
 	contactsPath := flag.String("contacts", os.Getenv("YAPUNO_CONTACTS_FILE"), "optional private file for guardian-approved contacts")
 	messagesPath := flag.String("messages", os.Getenv("YAPUNO_MESSAGES_FILE"), "optional private message log; requires pairing and contacts")
+	reportsPath := flag.String("reports", os.Getenv("YAPUNO_REPORTS_FILE"), "optional private file for messages children report to their guardians; requires messages")
 	guardianLocksPath := flag.String("guardian-locks", os.Getenv("YAPUNO_GUARDIAN_LOCKS_FILE"), "optional private file for emergency locks of guardian access")
 	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
 	flag.Parse()
@@ -273,6 +291,16 @@ func main() {
 		}
 		defer messageStore.Close()
 	}
+	var reportStore *reports.Store
+	if *reportsPath != "" {
+		if messageStore == nil {
+			log.Fatal("YAPUNO_REPORTS_FILE requires YAPUNO_MESSAGES_FILE")
+		}
+		reportStore, err = reports.Open(*reportsPath, messageStore, store, time.Now)
+		if err != nil {
+			log.Fatal("report store unavailable, insecure or corrupt")
+		}
+	}
 	var guardianLocks *guardianlock.Store
 	if *guardianLocksPath != "" {
 		guardianLocks, err = guardianlock.Open(*guardianLocksPath, time.Now)
@@ -293,7 +321,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	handler, err := newHandler(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks})
+	handler, err := newHandler(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}

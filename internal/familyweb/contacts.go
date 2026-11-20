@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"time"
 
 	"github.com/pblumer/yapuno/internal/appearance"
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/fontassets"
+	"github.com/pblumer/yapuno/internal/reports"
 	"github.com/pblumer/yapuno/internal/skin"
 )
 
@@ -23,6 +25,20 @@ type ContactStore interface {
 	Redeem(guardianID, tenantID, childID, code string) (string, error)
 	Confirm(guardianID, tenantID, childID, linkID string) error
 	Remove(guardianID, tenantID, childID, linkID string) error
+	// Unblock lifts a block that this child set itself.
+	Unblock(guardianID, tenantID, childID, linkID string) error
+}
+
+// ReportStore holds the reports a child filed about single messages. It must
+// show them only to guardians with current authority for that child.
+type ReportStore interface {
+	ForChild(guardianID, tenantID, childID string) ([]reports.Report, error)
+	Dismiss(guardianID, tenantID, childID, reportID string) error
+}
+
+// ReportCounter tells the family overview how many reports are open.
+type ReportCounter interface {
+	Count(guardianID, tenantID, childID string) int
 }
 
 var linkIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
@@ -34,9 +50,26 @@ func NewContactPages(auth Authenticator, store ContactStore, families FamilyStor
 	if auth == nil || store == nil || families == nil {
 		return nil, errors.New("authenticator, contact store and family store are required")
 	}
-	h := &contactHandler{auth: auth, store: store, families: families, looks: looks}
+	return newContactPages(auth, store, families, looks, nil)
+}
+
+// NewContactPagesWithReports additionally shows the messages a child reported
+// and lets a guardian dismiss them.
+func NewContactPagesWithReports(auth Authenticator, store ContactStore, families FamilyStore, looks AppearanceStore, reported ReportStore) (http.Handler, error) {
+	if auth == nil || store == nil || families == nil || reported == nil {
+		return nil, errors.New("authenticator, contact store, family store and report store are required")
+	}
+	return newContactPages(auth, store, families, looks, reported)
+}
+
+func newContactPages(auth Authenticator, store ContactStore, families FamilyStore, looks AppearanceStore, reported ReportStore) (http.Handler, error) {
+	h := &contactHandler{auth: auth, store: store, families: families, looks: looks, reports: reported}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /family/contacts", h.view)
+	mux.HandleFunc("POST /family/contacts/unblock", h.unblock)
+	if reported != nil {
+		mux.HandleFunc("POST /family/contacts/report-done", h.reportDone)
+	}
 	mux.HandleFunc("POST /family/contacts/invite", h.invite)
 	mux.HandleFunc("POST /family/contacts/redeem", h.redeem)
 	mux.HandleFunc("POST /family/contacts/confirm", h.confirm)
@@ -49,6 +82,7 @@ type contactHandler struct {
 	store    ContactStore
 	families FamilyStore
 	looks    AppearanceStore
+	reports  ReportStore // nil: reports are not shown
 }
 
 func authenticated(auth Authenticator, w http.ResponseWriter, r *http.Request) (Session, bool) {
@@ -139,9 +173,11 @@ func explained(err error) (string, int, bool) {
 }
 
 var notices = map[string]string{
-	"requested": "Anfrage gesendet. Die andere Familie muss sie jetzt noch freigeben.",
-	"confirmed": "Kontakt freigegeben.",
-	"removed":   "Entfernt.",
+	"requested":   "Anfrage gesendet. Die andere Familie muss sie jetzt noch freigeben.",
+	"confirmed":   "Kontakt freigegeben.",
+	"removed":     "Entfernt.",
+	"unblocked":   "Blockierung aufgehoben.",
+	"report-done": "Meldung gelöscht.",
 }
 
 const contactCSS = `body{margin:0}
@@ -170,6 +206,7 @@ const contactCSS = `body{margin:0}
 .yp-status,.yp-alert{padding:.8rem 1rem;border-radius:var(--yp-radius);background:var(--yp-surface);font-weight:700}
 .yp-status{border:2px solid var(--yp-line)}
 .yp-alert{border:2px solid var(--yp-danger-text)}
+.yp-reported{margin:.5rem 0;padding:.7rem .9rem;border-left:4px solid var(--yp-accent-text);border-radius:var(--yp-radius);background:var(--yp-bg);white-space:pre-wrap;overflow-wrap:anywhere}
 .yp-code{display:block;padding:1rem;border:2px dashed var(--yp-accent-text);border-radius:var(--yp-radius);background:var(--yp-bg);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.25rem;font-weight:700;letter-spacing:.06em;text-align:center;overflow-wrap:anywhere;user-select:all}
 `
 
@@ -196,6 +233,20 @@ var contactPage = template.Must(template.New("contacts").Parse(contactHead + `
 <h1>Kontakte von {{.Name}}</h1>
 <p class="yp-muted">{{.Name}} kann nur mit Kindern schreiben, denen beide Familien zugestimmt haben. Es gibt kein Verzeichnis und keine Suche.</p>
 {{if .Alert}}<p class="yp-alert" role="alert">{{.Alert}}</p>{{end}}{{if .Notice}}<p class="yp-status" role="status">{{.Notice}}</p>{{end}}
+{{if .Reports}}<section aria-labelledby="yp-reports"><h2 id="yp-reports">Meldungen von {{.Name}}</h2>
+<p class="yp-muted">{{.Name}} hat diese Nachrichten gemeldet. Du siehst nur die gemeldete Nachricht, nicht den übrigen Chat. Die andere Familie wurde nicht informiert.</p>
+<ul>{{range .Reports}}<li class="yp-item"><strong>Nachricht von {{if .From}}{{.From}}{{else}}einem Kind{{end}}</strong>
+<blockquote class="yp-reported">{{.Body}}</blockquote>
+<p class="yp-muted">Geschrieben am {{.Sent}} · Gemeldet am {{.Filed}}</p>
+<form method="post" action="/family/contacts/report-done"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="child_id" value="{{$.Child}}"><input type="hidden" name="report_id" value="{{.ID}}"><label class="yp-check"><input type="checkbox" name="confirm" value="yes" required> <span>Wir haben darüber gesprochen. Meldung und Kopie der Nachricht löschen.</span></label><button class="yp-secondary" type="submit">Erledigt</button></form></li>{{end}}</ul>
+<p class="yp-muted">Eine Meldung wird nach {{.RetentionDays}} Tagen automatisch gelöscht. Einen Kontakt kannst du weiter unten entfernen.</p></section>{{end}}
+{{if .View.Blocked}}<section aria-labelledby="yp-blocked"><h2 id="yp-blocked">Von {{.Name}} blockiert</h2><ul>{{range .View.Blocked}}<li class="yp-item"><strong>{{.Name}}</strong>
+<p class="yp-muted">{{$.Name}} hat diesen Kontakt blockiert. Die beiden können sich nicht schreiben. Sprich mit {{$.Name}}, bevor du die Blockierung aufhebst.</p>
+<form method="post" action="/family/contacts/unblock"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="child_id" value="{{$.Child}}"><input type="hidden" name="link_id" value="{{.ID}}"><label class="yp-check"><input type="checkbox" name="confirm" value="yes" required> <span>{{$.Name}} ist einverstanden. Die beiden dürfen sich wieder schreiben.</span></label><button class="yp-secondary" type="submit">Blockierung aufheben</button></form>
+<form method="post" action="/family/contacts/remove"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="child_id" value="{{$.Child}}"><input type="hidden" name="link_id" value="{{.ID}}"><label class="yp-check"><input type="checkbox" name="confirm" value="yes" required> <span>Kontakt mit {{.Name}} beenden. Zum erneuten Verbinden braucht es einen neuen Code.</span></label><button class="yp-danger" type="submit">Kontakt entfernen</button></form></li>{{end}}</ul></section>{{end}}
+{{if .View.Paused}}<section aria-labelledby="yp-paused"><h2 id="yp-paused">Pausierte Kontakte</h2><ul>{{range .View.Paused}}<li class="yp-item"><strong>{{.Name}}</strong>
+<p class="yp-muted">Dieser Kontakt ist zurzeit pausiert. Die beiden können sich nicht schreiben.</p>
+<form method="post" action="/family/contacts/remove"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="child_id" value="{{$.Child}}"><input type="hidden" name="link_id" value="{{.ID}}"><label class="yp-check"><input type="checkbox" name="confirm" value="yes" required> <span>Kontakt mit {{.Name}} beenden. Zum erneuten Verbinden braucht es einen neuen Code.</span></label><button class="yp-danger" type="submit">Kontakt entfernen</button></form></li>{{end}}</ul></section>{{end}}
 {{if .View.Incoming}}<section aria-labelledby="yp-incoming"><h2 id="yp-incoming">Wartet auf eure Zustimmung</h2><ul>{{range .View.Incoming}}<li class="yp-item"><strong>{{.Name}}</strong>
 <p class="yp-muted">Die andere Familie hat euren Einladungscode eingelöst und zugestimmt. Gebt nur frei, wenn sie euch das selbst bestätigt hat.</p>
 <form method="post" action="/family/contacts/confirm"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="child_id" value="{{$.Child}}"><input type="hidden" name="link_id" value="{{.ID}}"><label class="yp-check"><input type="checkbox" name="confirm" value="yes" required> <span>Wir kennen diese Familie und stimmen dem Kontakt zu.</span></label><button class="yp-primary" type="submit">Freigeben</button></form>
@@ -211,7 +262,7 @@ var contactPage = template.Must(template.New("contacts").Parse(contactHead + `
 <form method="post" action="/family/contacts/invite"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="child_id" value="{{.Child}}"><button class="yp-primary" type="submit">Einladungscode erstellen</button></form>
 <p class="yp-muted">Offene Einladungen: {{.View.OpenInvitations}}. Ein Code gilt 24 Stunden und nur einmal.</p>
 <form method="post" action="/family/contacts/redeem"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="child_id" value="{{.Child}}"><label class="yp-field" for="yp-code">Code der anderen Familie</label><input type="text" id="yp-code" name="code" required maxlength="64" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false"><button class="yp-secondary" type="submit">Code einlösen</button></form></section>
-<p class="yp-muted">Vorschau mit synthetischen Profilen. Nachrichten sind noch nicht möglich.</p>
+<p class="yp-muted">Vorschau mit synthetischen Profilen.</p>
 </div></main></body></html>`))
 
 var contactInvitePage = template.Must(template.New("contact-invite").Parse(contactHead + `
@@ -242,6 +293,23 @@ func (h *contactHandler) render(w http.ResponseWriter, p Session, child string, 
 		respondContactError(w, err)
 		return
 	}
+	var reported []reportView
+	if h.reports != nil {
+		list, err := h.reports.ForChild(p.GuardianID, p.TenantID, child)
+		if err != nil {
+			// An unreadable report store must not look like "nothing reported".
+			if errors.Is(err, reports.ErrForbidden) {
+				http.Error(w, "Not authorized", http.StatusForbidden)
+				return
+			}
+			http.Error(w, "Unable to display reports", http.StatusInternalServerError)
+			return
+		}
+		for _, r := range list {
+			reported = append(reported, reportView{ID: r.ID, From: r.From, Body: r.Body,
+				Sent: r.SentAt.Local().Format("02.01.2006 15:04"), Filed: r.ReportedAt.Local().Format("02.01.2006 15:04")})
+		}
+	}
 	skinID, css, err := h.css(p)
 	if err != nil {
 		http.Error(w, "Unable to display contacts", http.StatusInternalServerError)
@@ -253,7 +321,16 @@ func (h *contactHandler) render(w http.ResponseWriter, p Session, child string, 
 		Skin, Name, Child, CSRF, Alert, Notice string
 		CSS                                    template.CSS
 		View                                   contacts.Overview
-	}{Skin: skinID, Name: name, Child: child, CSRF: p.CSRFToken, Alert: alert, Notice: notice, CSS: css, View: view})
+		Reports                                []reportView
+		RetentionDays                          int
+	}{Skin: skinID, Name: name, Child: child, CSRF: p.CSRFToken, Alert: alert, Notice: notice, CSS: css, View: view,
+		Reports: reported, RetentionDays: int(reports.Retention / (24 * time.Hour))})
+}
+
+// reportView is one reported message as shown to the reporting child's
+// guardian: the copy of that single message and two dates.
+type reportView struct {
+	ID, From, Body, Sent, Filed string
 }
 
 func (h *contactHandler) view(w http.ResponseWriter, r *http.Request) {
@@ -364,4 +441,39 @@ func (h *contactHandler) remove(w http.ResponseWriter, r *http.Request) {
 	h.decided(w, r, "removed", func(p Session, child, linkID string) error {
 		return h.store.Remove(p.GuardianID, p.TenantID, child, linkID)
 	})
+}
+
+func (h *contactHandler) unblock(w http.ResponseWriter, r *http.Request) {
+	h.decided(w, r, "unblocked", func(p Session, child, linkID string) error {
+		return h.store.Unblock(p.GuardianID, p.TenantID, child, linkID)
+	})
+}
+
+// reportDone deletes one report of the guardian's own child together with
+// the copy of the reported message.
+func (h *contactHandler) reportDone(w http.ResponseWriter, r *http.Request) {
+	headers(w)
+	p, ok := authenticated(h.auth, w, r)
+	if !ok {
+		return
+	}
+	form, ok := postedForm(w, r, p, "child_id", "report_id", "confirm")
+	if !ok {
+		return
+	}
+	if form.Get("confirm") != "yes" || !linkIDPattern.MatchString(form.Get("report_id")) {
+		http.Error(w, "Explicit confirmation required", http.StatusBadRequest)
+		return
+	}
+	child := form.Get("child_id")
+	switch err := h.reports.Dismiss(p.GuardianID, p.TenantID, child, form.Get("report_id")); {
+	case err == nil:
+		http.Redirect(w, r, "/family/contacts?child_id="+url.QueryEscape(child)+"&notice=report-done", http.StatusSeeOther)
+	case errors.Is(err, reports.ErrForbidden):
+		http.Error(w, "Not authorized", http.StatusForbidden)
+	case errors.Is(err, reports.ErrNotFound):
+		http.Error(w, "Report not found", http.StatusNotFound)
+	default:
+		http.Error(w, "Unable to delete the report", http.StatusInternalServerError)
+	}
 }

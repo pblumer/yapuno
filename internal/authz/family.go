@@ -64,6 +64,9 @@ type ContactGrant struct {
 	FirstApproved  bool
 	SecondApproved bool
 	Active         bool
+	// Blocked says that at least one of the two has blocked the other. A
+	// block suspends the contact for both; it does not end the consent.
+	Blocked bool
 }
 
 // CanContact authorizes the relationship, not the message operation. Device,
@@ -71,7 +74,7 @@ type ContactGrant struct {
 func CanContact(grant ContactGrant, sender, recipient Participant) bool {
 	if !sender.valid() || !recipient.valid() || sender == recipient ||
 		!grant.First.valid() || !grant.Second.valid() || grant.First == grant.Second ||
-		!grant.Active || !grant.FirstApproved || !grant.SecondApproved {
+		!grant.Active || !grant.FirstApproved || !grant.SecondApproved || grant.Blocked {
 		return false
 	}
 	return (grant.First == sender && grant.Second == recipient) ||

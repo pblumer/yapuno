@@ -53,6 +53,10 @@ type Children interface {
 type Contacts interface {
 	ContactsOf(contacts.Party) []contacts.Entry
 	Grant(id string, self contacts.Party) (contacts.Party, authz.ContactGrant, bool)
+	// BlockedBy lists the contacts this child blocked itself; Block suspends
+	// one of the child's own active contacts.
+	BlockedBy(contacts.Party) []contacts.Entry
+	Block(self contacts.Party, id string) error
 }
 
 // Looks reads and stores looks. The handler only ever stores the look of the
@@ -68,6 +72,9 @@ type Options struct {
 	Looks    Looks
 	// Messages enables chats. It requires Contacts, which names the peer.
 	Messages Messages
+	// Reports lets a child report one message to its own guardians. It
+	// requires Messages.
+	Reports Reports
 }
 
 type handler struct {
@@ -83,6 +90,9 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 	}
 	if opt.Messages != nil && opt.Contacts == nil {
 		return nil, errors.New("messaging requires the contact store")
+	}
+	if opt.Reports != nil && opt.Messages == nil {
+		return nil, errors.New("reporting requires messaging")
 	}
 	h := &handler{sessions: sessions, children: children, opt: opt}
 	mux := http.NewServeMux()
@@ -103,6 +113,11 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 		mux.HandleFunc("POST /child/chat/{id}/send", h.sendForm)
 		mux.HandleFunc("GET /child/chat/{id}/messages", h.historyJSON)
 		mux.HandleFunc("POST /child/chat/{id}/messages", h.sendJSON)
+		mux.HandleFunc("GET /child/chat/{id}/safety", h.safety)
+		mux.HandleFunc("POST /child/chat/{id}/block", h.block)
+		if opt.Reports != nil {
+			mux.HandleFunc("POST /child/chat/{id}/report", h.report)
+		}
 	}
 	return mux, nil
 }
@@ -267,16 +282,20 @@ const homeCSS = `body{margin:0}
 .yp-child form{margin-top:1.6rem}
 .yp-child button{min-height:48px;padding:.7rem 1rem;border:2px solid var(--yp-text-muted);border-radius:var(--yp-radius);background:var(--yp-bg);color:var(--yp-text);font:inherit;font-weight:700;cursor:pointer}
 .yp-child button:focus-visible{outline:3px solid var(--yp-focus);outline-offset:2px}
+.yp-status,.yp-alert{padding:.8rem 1rem;border-radius:var(--yp-radius);background:var(--yp-surface);font-weight:700}
+.yp-status{border:2px solid var(--yp-line)}
+.yp-alert{border:2px solid var(--yp-danger-text)}
 `
 
 var homePage = template.Must(template.New("child-home").Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>Yapuno</title><style>{{.CSS}}</style></head><body>
 <main class="yp-child" data-yp-skin="{{.Skin}}"><div class="yp-shell">
 <header class="yp-top"><div class="yp-logo">ya<span>puno</span></div>{{if .LookHref}}<a class="yp-me" href="{{.LookHref}}" aria-label="Mein Look">{{.Figure}}</a>{{else}}{{.Figure}}{{end}}</header>
 <h1>Hoi {{.Name}}!</h1>
-<p class="yp-muted">Schön, dass du da bist.</p>
+{{if .Notice}}<p class="yp-status" role="status">{{.Notice}}</p>{{end}}<p class="yp-muted">Schön, dass du da bist.</p>
 <h2>Deine Crew</h2>
 {{if .Crew}}<ul class="yp-crew">{{range .Crew}}<li>{{if .Chat}}<a href="/child/chat/{{.Chat}}">{{template "face" .}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a>{{else}}{{template "face" .}}<span>{{.Name}}</span>{{end}}</li>{{end}}</ul>{{else}}<p class="yp-empty">Noch niemand in deiner Crew. Deine Eltern können dich mit anderen Kindern verbinden.</p>{{end}}
 <p class="yp-muted">In deiner Crew sind nur Kinder, denen beide Familien zugestimmt haben. Fremde können dich nicht finden.</p>
+{{if .Blocked}}<h2>Blockiert</h2><ul class="yp-crew">{{range .Blocked}}<li><span class="yp-initial" aria-hidden="true">{{.Initial}}</span><span>{{.Name}}</span></li>{{end}}</ul><p class="yp-muted">Ihr könnt euch nicht schreiben. Nur deine Eltern können eine Blockierung aufheben.</p>{{end}}
 <p class="yp-note">{{if .Chats}}Tippe auf einen Namen, um zu schreiben. Das hier ist eine Vorschau.{{else}}Nachrichten schreiben kommt bald. Das hier ist eine Vorschau.{{end}}</p>
 {{if .LookHref}}<p><a class="yp-link" href="{{.LookHref}}">Mein Look ändern</a></p>{{end}}
 <form method="post" action="/child/session/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit">Auf diesem Gerät abmelden</button></form>
@@ -315,15 +334,14 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		figure = ""
 	}
-	var crew []crewMember
+	var crew, blocked []crewMember
 	self := contacts.Party{TenantID: s.TenantID, ChildID: s.ChildID}
 	if h.opt.Contacts != nil {
+		for _, c := range h.opt.Contacts.BlockedBy(self) {
+			blocked = append(blocked, crewMember{Name: c.Name, Initial: initialOf(c.Name)})
+		}
 		for _, c := range h.opt.Contacts.ContactsOf(self) {
-			initial := ""
-			for _, r := range c.Name {
-				initial = strings.ToUpper(string(r))
-				break
-			}
+			initial := initialOf(c.Name)
 			member := crewMember{Name: c.Name, Initial: initial, Figure: h.peerFigure(self, c.ID)}
 			if h.opt.Messages != nil {
 				member.Chat = c.ID
@@ -340,17 +358,25 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = homePage.Execute(w, struct {
 		Skin, Name, CSRF string
+		Notice           string
 		CSS              template.CSS
 		Figure           template.HTML
-		Crew             []crewMember
+		Crew, Blocked    []crewMember
 		Chats            bool
 		LookHref         string
 	}{
-		Skin: def.ID, Name: name, CSRF: s.CSRFToken,
+		Skin: def.ID, Name: name, CSRF: s.CSRFToken, Notice: fixedNotice(r, homeNotices), Blocked: blocked,
 		// Validated first-party skin tokens and fixed component rules only.
 		CSS:    template.CSS(fontassets.FaceCSS(def.Typography.Heading, def.Typography.Body) + ".yp-child{" + decls + "}\n" + homeCSS),
 		Figure: figure, Crew: crew, Chats: h.opt.Messages != nil, LookHref: lookHref,
 	})
+}
+
+func initialOf(name string) string {
+	for _, r := range name {
+		return strings.ToUpper(string(r))
+	}
+	return ""
 }
 
 // peerFigure returns the figure of the other child in one of self's own

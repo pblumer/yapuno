@@ -36,7 +36,7 @@ The file is created with mode `0600` on first use. Without `YAPUNO_CONTACTS_FILE
 - A display name is not proof of identity; see the ADR for the interception scenario and mitigations.
 - No notification to co-guardians, no audit history, no rate limiting, single server process.
 - Deleted records leave no trace; retention and incident evidence are open (#7).
-- Guardian ↔ child and adult ↔ adult contacts (#12), groups and child-side block/report are not implemented.
+- Guardian ↔ child and adult ↔ adult contacts (#12), and groups are not implemented. Child-side block and report exist as a preview ([report and block](report-and-block.md)); guardians lift a block and see reports on this contact page.
 - Messaging authorizes every send and read from the stored grant (`contacts.Store.Grant`) together with device and profile state; see the [messaging preview](messaging-preview.md).
 
 ## MFE evidence (headless Chromium, not a physical device)

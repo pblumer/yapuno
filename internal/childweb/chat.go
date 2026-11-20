@@ -66,11 +66,13 @@ const chatCSS = `body{margin:0}
 .yp-chat{box-sizing:border-box;min-height:100vh;display:flex;flex-direction:column;background-color:var(--yp-bg);background-image:var(--yp-wallpaper);background-size:var(--yp-wallpaper-size);color:var(--yp-text);font-family:var(--yp-font-body);font-size:var(--yp-font-size);line-height:1.4}
 .yp-chat *{box-sizing:border-box}
 .yp-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.yp-head{display:flex;align-items:center;gap:.6rem;padding:.6rem .75rem;padding-top:max(.6rem,env(safe-area-inset-top));background:var(--yp-surface);border-bottom:1px solid var(--yp-line)}
+.yp-head{display:flex;align-items:center;gap:.5rem;padding:.6rem .6rem;padding-top:max(.6rem,env(safe-area-inset-top));background:var(--yp-surface);border-bottom:1px solid var(--yp-line)}
 .yp-back{flex:none;display:grid;place-items:center;min-width:44px;min-height:44px;border-radius:var(--yp-radius);color:var(--yp-accent-text);font-weight:800;text-decoration:none}
 .yp-head svg{flex:none}
 .yp-head h1{font-family:var(--yp-font-heading);font-size:1.15rem;margin:0;overflow-wrap:anywhere}
 .yp-head p{margin:0;font-size:.8rem;color:var(--yp-text-muted)}
+.yp-head div{flex:1;min-width:0}
+.yp-help{flex:none;display:grid;place-items:center;min-width:44px;min-height:44px;padding:0 .5rem;border:2px solid var(--yp-line);border-radius:var(--yp-radius);background:var(--yp-bg);color:var(--yp-text);font-size:.85rem;font-weight:700;text-decoration:none}
 .yp-banner{margin:0;padding:.6rem .9rem;background:var(--yp-surface);border-bottom:2px solid var(--yp-danger-text);font-weight:700}
 .yp-list{flex:1;list-style:none;margin:0;padding:1rem .75rem;display:flex;flex-direction:column;gap:.5rem}
 .yp-msg{max-width:82%;display:flex;flex-direction:column;gap:.15rem}
@@ -86,12 +88,13 @@ const chatCSS = `body{margin:0}
 .yp-compose textarea{flex:1;min-width:0;min-height:48px;max-height:9rem;padding:.7rem .9rem;border:2px solid var(--yp-text-muted);border-radius:var(--yp-radius);background:var(--yp-bg);color:var(--yp-text);font:inherit;resize:none}
 .yp-send{flex:none;min-width:48px;min-height:48px;padding:0 1rem;border:0;border-radius:var(--yp-radius);background:var(--yp-accent);color:var(--yp-on-accent);font:inherit;font-weight:800;cursor:pointer}
 .yp-chat :disabled{opacity:.55;cursor:not-allowed}
-.yp-back:focus-visible,.yp-send:focus-visible,.yp-retry:focus-visible,.yp-compose textarea:focus-visible{outline:3px solid var(--yp-focus);outline-offset:2px}
+@media (max-width:400px){.yp-head{flex-wrap:wrap;row-gap:.15rem}.yp-head div{display:contents}.yp-head h1{flex:1;min-width:0;order:1}.yp-help{order:2}.yp-head p{order:3;flex-basis:100%}}
+.yp-help:focus-visible,.yp-back:focus-visible,.yp-send:focus-visible,.yp-retry:focus-visible,.yp-compose textarea:focus-visible{outline:3px solid var(--yp-focus);outline-offset:2px}
 `
 
 var chatPage = template.Must(template.New("child-chat").Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>Yapuno – {{.Peer}}</title><style>{{.CSS}}</style></head><body>
 <main class="yp-chat" id="yp-chat" data-yp-skin="{{.Skin}}" data-conversation="{{.Conversation}}" data-csrf="{{.CSRF}}" data-last-seq="{{.LastSeq}}">
-<header class="yp-head"><a class="yp-back" href="/child" aria-label="Zurück zu deiner Crew">←</a>{{.PeerFigure}}<div><h1>{{.Peer}}</h1><p>Von beiden Familien freigegeben</p></div></header>
+<header class="yp-head"><a class="yp-back" href="/child" aria-label="Zurück zu deiner Crew">←</a>{{.PeerFigure}}<div><h1>{{.Peer}}</h1><p>Von beiden Familien freigegeben</p></div><a class="yp-help" href="/child/chat/{{.Conversation}}/safety" aria-label="{{.SafetyLabel}}">{{.SafetyText}}</a></header>
 <p class="yp-banner" id="yp-banner" role="{{if .Alert}}alert{{else}}status{{end}}"{{if not .Alert}} hidden{{end}}>{{.Alert}}</p>
 <ol class="yp-list" id="yp-messages" aria-label="Nachrichten">{{range .Messages}}<li class="yp-msg {{if .Mine}}yp-mine{{else}}yp-theirs{{end}}" data-seq="{{.Seq}}"><p class="yp-text">{{.Body}}</p><p class="yp-meta">{{if .Mine}}Gesendet · {{end}}<time datetime="{{.ISO}}">{{.Clock}}</time></p></li>{{else}}<li class="yp-empty">Noch keine Nachrichten. Schreib die erste!</li>{{end}}</ol>
 <form class="yp-compose" id="yp-compose" method="post" action="/child/chat/{{.Conversation}}/send"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><label class="yp-sr" for="yp-body">Nachricht an {{.Peer}}</label><textarea id="yp-body" name="body" rows="1" required maxlength="1000" autocomplete="off" enterkeyhint="send" placeholder="Nachricht schreiben">{{.Draft}}</textarea><button class="yp-send" type="submit">Senden</button></form>
@@ -159,12 +162,14 @@ func (h *handler) renderChat(w http.ResponseWriter, r *http.Request, s childsess
 	w.WriteHeader(status)
 	_ = chatPage.Execute(w, struct {
 		Skin, Peer, Conversation, CSRF, ClientID, Alert, Draft string
+		SafetyLabel, SafetyText                                string
 		LastSeq                                                uint64
 		PeerFigure                                             template.HTML
 		CSS                                                    template.CSS
 		Messages                                               []chatMessage
 	}{
 		Skin: def.ID, Peer: peer, Conversation: conversationID, CSRF: s.CSRFToken, ClientID: clientID, Alert: alert, Draft: draft,
+		SafetyLabel: h.safetyTitle(), SafetyText: h.safetyShort(),
 		LastSeq: last, PeerFigure: h.peerFigure(self, conversationID),
 		// Validated first-party skin tokens and fixed component rules only.
 		CSS:      template.CSS(fontassets.FaceCSS(def.Typography.Heading, def.Typography.Body) + ".yp-chat{" + decls + "}\n" + chatCSS),
