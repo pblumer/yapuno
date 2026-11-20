@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -47,6 +48,27 @@ func TestDemoOffersEveryFirstPartySkin(t *testing.T) {
 	for id, s := range skin.Catalog() {
 		if !strings.Contains(w.Body.String(), `href="/?skin=`+id+`"`) || !strings.Contains(w.Body.String(), s.Name) {
 			t.Errorf("demo navigation misses skin %q", id)
+		}
+	}
+}
+
+func TestDemoServesTheFontsItsSkinsDeclare(t *testing.T) {
+	handler := newDemoState().handler()
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/?skin=terminal", nil))
+	// The page's own policy must let the browser load what the page declares.
+	if csp := page.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "font-src 'self'") || !strings.Contains(csp, "default-src 'none'") {
+		t.Fatalf("demo policy blocks its own fonts: %q", csp)
+	}
+	urls := regexp.MustCompile(`url\((/assets/fonts/[^)]+)\)`).FindAllStringSubmatch(page.Body.String(), -1)
+	if len(urls) != 2 {
+		t.Fatalf("expected two font URLs for the terminal skin, got %d", len(urls))
+	}
+	for _, m := range urls {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, m[1], nil))
+		if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "font/woff2" {
+			t.Fatalf("%s: %d", m[1], w.Code)
 		}
 	}
 }

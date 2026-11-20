@@ -18,6 +18,7 @@ import (
 
 	"github.com/pblumer/yapuno/internal/authz"
 	"github.com/pblumer/yapuno/internal/familydashboard"
+	"github.com/pblumer/yapuno/internal/fontassets"
 	"github.com/pblumer/yapuno/internal/skin"
 )
 
@@ -42,6 +43,8 @@ func newDemoState() *demoState {
 
 func (s *demoState) handler() http.Handler {
 	mux := http.NewServeMux()
+	// "GET" also matches HEAD; other methods get 405 from the mux.
+	mux.Handle("GET "+fontassets.Prefix, fontassets.Handler())
 	mux.HandleFunc("GET /", s.view)
 	mux.HandleFunc("POST /profiles", s.add)
 	return mux
@@ -80,7 +83,7 @@ func (s *demoState) view(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 	s.mu.Lock()
 	children := append([]familydashboard.Child(nil), s.children...)
 	token := s.token

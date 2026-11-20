@@ -22,6 +22,7 @@ import (
 	"github.com/pblumer/yapuno/internal/authz"
 	"github.com/pblumer/yapuno/internal/childsession"
 	"github.com/pblumer/yapuno/internal/contacts"
+	"github.com/pblumer/yapuno/internal/fontassets"
 	"github.com/pblumer/yapuno/internal/skin"
 )
 
@@ -113,9 +114,9 @@ func headers(w http.ResponseWriter, scripts bool) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
-	csp := "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+	csp := "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 	if scripts {
-		csp = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+		csp = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 	}
 	w.Header().Set("Content-Security-Policy", csp)
 }
@@ -347,7 +348,7 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 	}{
 		Skin: def.ID, Name: name, CSRF: s.CSRFToken,
 		// Validated first-party skin tokens and fixed component rules only.
-		CSS:    template.CSS(".yp-child{" + decls + "}\n" + homeCSS),
+		CSS:    template.CSS(fontassets.FaceCSS(def.Typography.Heading, def.Typography.Body) + ".yp-child{" + decls + "}\n" + homeCSS),
 		Figure: figure, Crew: crew, Chats: h.opt.Messages != nil, LookHref: lookHref,
 	})
 }

@@ -121,3 +121,37 @@ func TestRenderHTMLWithFigureLinksToProfile(t *testing.T) {
 		t.Fatal("figure or profile link rendered without options")
 	}
 }
+
+// A page declares only the self-hosted fonts its own skin uses, so the
+// default look loads no font file at all, and never an external one.
+func TestRenderHTMLDeclaresOnlyTheSkinsOwnSelfHostedFonts(t *testing.T) {
+	cases := map[string][]string{
+		"classic":  nil,
+		"vivid":    {`font-family:"Bricolage Grotesque"`, `font-family:"Plus Jakarta Sans"`},
+		"night":    {`font-family:"Plus Jakarta Sans"`},
+		"cloud":    {`font-family:"Nunito"`},
+		"terminal": {`font-family:"JetBrains Mono"`},
+	}
+	for id, want := range cases {
+		html, err := RenderHTML(nil, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Count(html, "@font-face"); got != 2*len(want) {
+			t.Errorf("%s: %d font faces, want %d", id, got, 2*len(want))
+		}
+		for _, face := range want {
+			if !strings.Contains(html, face) {
+				t.Errorf("%s: missing %s", id, face)
+			}
+		}
+		for _, m := range regexp.MustCompile(`url\(([^)]+)\)`).FindAllStringSubmatch(html, -1) {
+			if !strings.HasPrefix(m[1], "/assets/fonts/") {
+				t.Errorf("%s: URL outside the font path: %s", id, m[1])
+			}
+		}
+		if strings.Contains(html, "googleapis") || strings.Contains(html, "gstatic") || strings.Contains(html, "https://") {
+			t.Errorf("%s: external reference", id)
+		}
+	}
+}

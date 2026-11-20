@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"html/template"
 
+	"github.com/pblumer/yapuno/internal/fontassets"
 	"github.com/pblumer/yapuno/internal/skin"
 )
 
@@ -33,7 +34,7 @@ func RenderHTMLWithOptions(cards []ChildCard, opts Options) (string, error) {
 	}
 	const markup = `<section class="yp-family" aria-labelledby="yp-family-title" data-yp-skin="{{.Skin}}">
 <style>
-.yp-family{box-sizing:border-box;{{.CSS}}--yp-shadow:0 12px 40px rgba(18,24,43,.08);background-color:var(--yp-bg);background-image:var(--yp-wallpaper);background-size:var(--yp-wallpaper-size);color:var(--yp-text);padding:clamp(1rem,3vw,2.5rem);font-family:var(--yp-font-body);font-size:var(--yp-font-size);min-height:100vh}
+{{.Fonts}}.yp-family{box-sizing:border-box;{{.CSS}}--yp-shadow:0 12px 40px rgba(18,24,43,.08);background-color:var(--yp-bg);background-image:var(--yp-wallpaper);background-size:var(--yp-wallpaper-size);color:var(--yp-text);padding:clamp(1rem,3vw,2.5rem);font-family:var(--yp-font-body);font-size:var(--yp-font-size);min-height:100vh}
 .yp-family *{box-sizing:border-box}
 .yp-family .yp-shell{max-width:1080px;margin:auto}
 .yp-family .yp-top{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding-bottom:1.5rem}
@@ -85,11 +86,16 @@ func RenderHTMLWithOptions(cards []ChildCard, opts Options) (string, error) {
 	var buf bytes.Buffer
 	err = tmpl.Execute(&buf, struct {
 		Skin        string
+		Fonts       template.CSS
 		CSS         template.CSS
 		Cards       []ChildCard
 		Avatar      template.HTML
 		ProfileHref string
-	}{Skin: selected.ID, CSS: template.CSS(css), Cards: cards, Avatar: opts.Avatar, ProfileHref: opts.ProfileHref})
+	}{
+		Skin: selected.ID,
+		// Fixed @font-face rules for the skin's own self-hosted fonts.
+		Fonts: template.CSS(fontassets.FaceCSS(selected.Typography.Heading, selected.Typography.Body)),
+		CSS:   template.CSS(css), Cards: cards, Avatar: opts.Avatar, ProfileHref: opts.ProfileHref})
 	if err != nil {
 		return "", err
 	}

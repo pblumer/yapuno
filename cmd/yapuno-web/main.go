@@ -23,6 +23,7 @@ import (
 	"github.com/pblumer/yapuno/internal/devicepairing"
 	"github.com/pblumer/yapuno/internal/familystore"
 	"github.com/pblumer/yapuno/internal/familyweb"
+	"github.com/pblumer/yapuno/internal/fontassets"
 	"github.com/pblumer/yapuno/internal/guardiandirectory"
 	"github.com/pblumer/yapuno/internal/guardianlogin"
 	"github.com/pblumer/yapuno/internal/guardianmailer"
@@ -104,6 +105,8 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 	}
 	mux := http.NewServeMux()
 	loginRoutes, familyRoutes := login.Routes(), family
+	// Self-hosted fonts are public static files; no session is involved.
+	mux.Handle(fontassets.Prefix, fontassets.Handler())
 	mux.Handle("/login", loginRoutes)
 	mux.Handle("/login/", loginRoutes)
 	mux.Handle("/family", familyRoutes)

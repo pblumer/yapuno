@@ -43,7 +43,7 @@ Status labels ("sending", "sent", "not sent"), contact-approval and consent UI, 
 - Positive: new themes are data; accessibility minimums are enforced in tests for every first-party skin; skins cannot load remote resources; a single manifest format can serve web and native clients.
 - Negative / accepted trade-offs: radically different *layouts* (e.g. bottom vs. side navigation) are not yet expressible; vocabularies must be extended by code review, which slows community theming; WCAG 2.x contrast is a minimum, not proof of readability (APCA and real-user testing may disagree).
 - Open questions and review gates:
-  - **Fonts:** font families are named in stacks but not shipped. They must be self-hosted (no Google Fonts requests) with verified licenses before use; until then system fonts render.
+  - **Fonts:** resolved for the first-party set: the four families are embedded and served from the own origin under OFL 1.1, see [self-hosted fonts](../planning/self-hosted-fonts.md). A new font key requires files, a licence check and tests in `internal/fontassets`.
   - **Preferences:** per-subject persistence (guardian or child, per tenant) and a guardian "Mein Look" picker exist as an engineering preview ([Mein Look](../planning/mein-look.md)); children choose their own look through the same picker; guardian age-appropriate restrictions and deletion/retention are not implemented.
   - **Layout slots:** define an enumerated set of component variants before any theme needs a different layout.
   - **High-contrast mode** and dynamic type beyond 20 px base size need their own rules.

@@ -15,12 +15,13 @@ A skin assigns values to fixed semantic roles:
 
 `Validate` fails closed on unknown versions or vocabulary values, malformed colors, and contrast below 4.5:1 for every text pairing (3:1 for the focus indicator). Invalid preferences resolve to a vetted fallback.
 
+Fonts are [self-hosted](self-hosted-fonts.md): a font key maps to files served from the own origin, never to a third-party request.
+
 All users, including children, retain full browser/PWA functionality. Future iOS/Android clients should consume the same semantic tokens.
 
 Never permit a skin to modify authorization, consent, contact approval, privacy UI obligations or message status wording.
 
 ## Next slices
-- Self-hosted, license-checked font files (until then system fonts render)
 - Guardian age-appropriate restrictions (guardians and children already choose and persist their own look: see [Mein Look](mein-look.md))
 - Enumerated component slots for layout variants
 - High-contrast mode, dynamic type beyond 20 px, responsive visual regression
