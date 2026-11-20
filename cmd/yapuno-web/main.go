@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pblumer/yapuno/internal/appearance"
+	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/devicepairing"
 	"github.com/pblumer/yapuno/internal/familystore"
 	"github.com/pblumer/yapuno/internal/familyweb"
@@ -49,6 +50,7 @@ func (v verifiedSessions) Authenticate(r *http.Request) (familyweb.Session, erro
 type optionalStores struct {
 	pairing    *devicepairing.Store
 	appearance *appearance.Store
+	contacts   *contacts.Store
 }
 
 func newHandler(origin string, store *familystore.Store, directory *guardiandirectory.Directory, sender guardianlogin.Sender, sessions *guardiansession.Manager, opt optionalStores) (http.Handler, error) {
@@ -60,12 +62,14 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 		return nil, err
 	}
 	auth := verifiedSessions{sessions: sessions, directory: directory}
-	var family http.Handler
+	familyOptions := familyweb.Options{DevicePages: opt.pairing != nil, ContactPages: opt.contacts != nil}
+	// Assign only a non-nil store: a typed nil pointer would be a non-nil interface.
+	var looks familyweb.AppearanceStore
 	if opt.appearance != nil {
-		family, err = familyweb.NewWithAppearance(auth, store, opt.appearance, opt.pairing != nil)
-	} else {
-		family, err = familyweb.New(auth, store, opt.pairing != nil)
+		looks = opt.appearance
+		familyOptions.Looks = looks
 	}
+	family, err := familyweb.NewWithOptions(auth, store, familyOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +89,14 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 			return nil, err
 		}
 		mux.Handle("/family/look", lookRoutes)
+	}
+	if opt.contacts != nil {
+		contactRoutes, err := familyweb.NewContactPages(auth, opt.contacts, store, looks)
+		if err != nil {
+			return nil, err
+		}
+		mux.Handle("/family/contacts", contactRoutes)
+		mux.Handle("/family/contacts/", contactRoutes)
 	}
 	if opt.pairing != nil {
 		deviceRoutes, err := familyweb.NewDevicePages(auth, opt.pairing, origin)
@@ -117,6 +129,7 @@ func main() {
 	storePath := flag.String("families", os.Getenv("YAPUNO_FAMILIES_FILE"), "durable family state file")
 	guardiansPath := flag.String("guardians", os.Getenv("YAPUNO_GUARDIANS_FILE"), "offline-provisioned guardian identity file (0600)")
 	pairingPath := flag.String("pairing", os.Getenv("YAPUNO_PAIRING_FILE"), "optional private device pairing file")
+	contactsPath := flag.String("contacts", os.Getenv("YAPUNO_CONTACTS_FILE"), "optional private file for guardian-approved contacts")
 	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
 	flag.Parse()
 	host, _, err := net.SplitHostPort(*listen)
@@ -148,6 +161,13 @@ func main() {
 			log.Fatal("appearance store unavailable or insecure")
 		}
 	}
+	var contactStore *contacts.Store
+	if *contactsPath != "" {
+		contactStore, err = contacts.Open(*contactsPath, store, time.Now)
+		if err != nil {
+			log.Fatal("contact store unavailable or insecure")
+		}
+	}
 	smtpPort := 465
 	sender, err := guardianmailer.New(guardianmailer.Config{
 		Host: os.Getenv("YAPUNO_SMTP_HOST"), Port: smtpPort,
@@ -161,7 +181,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	handler, err := newHandler(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore})
+	handler, err := newHandler(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}

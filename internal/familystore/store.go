@@ -88,6 +88,23 @@ func (s *Store) Cards(guardianID, tenantID string) []familydashboard.ChildCard {
 	return familydashboard.Build(guardianID, tenantID, s.state.Children, s.state.Grants)
 }
 
+// ChildName returns the display name of one tenant-qualified child. It is not
+// an authorization check: callers must already hold a relationship (their own
+// grant or an explicit contact record) that justifies showing this name.
+func (s *Store) ChildName(tenantID, childID string) (string, bool) {
+	if tenantID == "" || childID == "" {
+		return "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.state.Children {
+		if c.TenantID == tenantID && c.ID == childID {
+			return c.DisplayName, true
+		}
+	}
+	return "", false
+}
+
 // RenameChild requires an active guardian grant scoped to this child and tenant.
 // Authentication of guardianID MUST happen before calling this method.
 func (s *Store) RenameChild(guardianID, tenantID, childID, name string) error {

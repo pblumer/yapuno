@@ -40,15 +40,27 @@ const (
 	ParticipantAdult
 )
 
-// ContactGrant describes current mutual contact consent for two participants.
+// Participant is a tenant-qualified chat identity. The same ID in another
+// tenant is a different participant.
+type Participant struct {
+	TenantID string
+	ID       string
+	Kind     ParticipantKind
+}
+
+func (p Participant) valid() bool {
+	return p.TenantID != "" && p.ID != "" && (p.Kind == ParticipantAdult || p.Kind == ParticipantChild)
+}
+
+// ContactGrant describes current mutual contact consent for exactly two
+// tenant-qualified participants, who may belong to different family tenants.
+// It is the only cross-family relationship and grants nothing beyond this
+// pair: no tenant-wide access, no discovery, no guardian authority.
 // Consent for child participants must be issued through authorized guardians.
 // Caller must load these values from trusted storage.
 type ContactGrant struct {
-	TenantID       string
-	FirstID        string
-	SecondID       string
-	FirstKind      ParticipantKind
-	SecondKind     ParticipantKind
+	First          Participant
+	Second         Participant
 	FirstApproved  bool
 	SecondApproved bool
 	Active         bool
@@ -56,13 +68,12 @@ type ContactGrant struct {
 
 // CanContact authorizes the relationship, not the message operation. Device,
 // membership, sender status, and read/stream permissions need separate checks.
-func CanContact(grant ContactGrant, tenantID, senderID, recipientID string) bool {
-	if tenantID == "" || senderID == "" || recipientID == "" || senderID == recipientID ||
-		grant.TenantID != tenantID || !grant.Active || !grant.FirstApproved || !grant.SecondApproved ||
-		(grant.FirstKind != ParticipantAdult && grant.FirstKind != ParticipantChild) ||
-		(grant.SecondKind != ParticipantAdult && grant.SecondKind != ParticipantChild) {
+func CanContact(grant ContactGrant, sender, recipient Participant) bool {
+	if !sender.valid() || !recipient.valid() || sender == recipient ||
+		!grant.First.valid() || !grant.Second.valid() || grant.First == grant.Second ||
+		!grant.Active || !grant.FirstApproved || !grant.SecondApproved {
 		return false
 	}
-	return (grant.FirstID == senderID && grant.SecondID == recipientID) ||
-		(grant.SecondID == senderID && grant.FirstID == recipientID)
+	return (grant.First == sender && grant.Second == recipient) ||
+		(grant.Second == sender && grant.First == recipient)
 }
