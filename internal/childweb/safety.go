@@ -25,10 +25,14 @@ import (
 type Reports interface {
 	File(p messages.Principal, conversationID string, seq uint64) (bool, error)
 	Reported(p contacts.Party, conversationID string) map[uint64]bool
+	// Seen returns which of this child's reports a guardian has seen.
+	Seen(p contacts.Party, conversationID string) map[uint64]bool
 }
 
 // reportChoices bounds how many of the other child's messages are offered.
-const reportChoices = 20
+// Messages the child already reported are listed in addition, so their
+// status stays visible. It is a variable so tests can lower it.
+var reportChoices = 20
 
 // homeNotices and safetyNotices are the only texts a redirect can select.
 var (
@@ -98,7 +102,7 @@ var safetyPage = template.Must(template.New("child-safety").Parse(`<!doctype htm
 <p>Deine Eltern sehen genau diese eine Nachricht und dass du sie gemeldet hast. Sonst sehen sie nichts aus dem Chat. {{.Peer}} erfährt nichts davon.</p>
 {{if .Messages}}<form method="post" action="/child/chat/{{.Conversation}}/report"><input type="hidden" name="csrf_token" value="{{.CSRF}}">
 <fieldset><legend>Welche Nachricht von {{.Peer}}?</legend>
-{{range .Messages}}{{if .Reported}}<div class="yp-pick yp-done"><span class="yp-quote">{{.Body}}</span><small><time datetime="{{.ISO}}">{{.Clock}}</time> · Schon gemeldet</small></div>
+{{range .Messages}}{{if .Reported}}<div class="yp-pick yp-done"><span class="yp-quote">{{.Body}}</span><small><time datetime="{{.ISO}}">{{.Clock}}</time> · {{if .Seen}}Deine Eltern haben die Meldung gesehen{{else}}Schon gemeldet{{end}}</small></div>
 {{else}}<label class="yp-pick"><input type="radio" name="seq" value="{{.Seq}}" required><span><span class="yp-quote">{{.Body}}</span><small><time datetime="{{.ISO}}">{{.Clock}}</time></small></span></label>
 {{end}}{{end}}</fieldset>
 {{if .Selectable}}<label class="yp-check"><input type="checkbox" name="block" value="yes"> <span>Ausserdem {{.Peer}} blockieren.</span></label>
@@ -116,6 +120,8 @@ type reportChoice struct {
 	ISO      string
 	Clock    string
 	Reported bool
+	// Seen says that a guardian has opened or dismissed this report.
+	Seen bool
 }
 
 // renderSafety writes the page for one of the child's own conversations.
@@ -136,13 +142,20 @@ func (h *handler) renderSafety(w http.ResponseWriter, r *http.Request, s childse
 	selectable := false
 	if h.opt.Reports != nil {
 		reported := h.opt.Reports.Reported(self, conversationID)
+		seen := h.opt.Reports.Seen(self, conversationID)
 		// Newest first; only messages of the other child can be reported.
-		for i := len(recent) - 1; i >= 0 && len(choices) < reportChoices; i-- {
+		offered := 0
+		for i := len(recent) - 1; i >= 0; i-- {
 			m := recent[i]
 			if m.From == self {
 				continue
 			}
-			choices = append(choices, reportChoice{Seq: m.Seq, Body: m.Body, Reported: reported[m.Seq],
+			// Beyond the limit only messages with a report are listed.
+			if offered >= reportChoices && !reported[m.Seq] {
+				continue
+			}
+			offered++
+			choices = append(choices, reportChoice{Seq: m.Seq, Body: m.Body, Reported: reported[m.Seq], Seen: reported[m.Seq] && seen[m.Seq],
 				ISO: m.At.UTC().Format(time.RFC3339), Clock: m.At.Local().Format("02.01. 15:04")})
 			selectable = selectable || !reported[m.Seq]
 		}
@@ -271,7 +284,7 @@ func (h *handler) report(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid block option", http.StatusBadRequest)
 		return
 	}
-	_, err = h.opt.Reports.File(principal(s), id, seq)
+	created, err := h.opt.Reports.File(principal(s), id, seq)
 	stored := err == nil
 	switch {
 	case stored:
@@ -291,16 +304,26 @@ func (h *handler) report(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !alsoBlock {
-		http.Redirect(w, r, "/child/chat/"+id+"/safety?done=reported", http.StatusSeeOther)
+		// A message that was already reported is not confirmed as a new
+		// report; the page shows its current status instead.
+		target := "/child/chat/" + id + "/safety"
+		if created {
+			target += "?done=reported"
+		}
+		http.Redirect(w, r, target, http.StatusSeeOther)
 		return
 	}
 	if err := h.opt.Contacts.Block(contacts.Party{TenantID: s.TenantID, ChildID: s.ChildID}, id); err != nil {
 		http.Error(w, "Unable to block", http.StatusInternalServerError)
 		return
 	}
-	if stored {
+	switch {
+	case stored && created:
 		http.Redirect(w, r, "/child?done=reported-blocked", http.StatusSeeOther)
-		return
+	case stored:
+		// Reported earlier: nothing new went to the guardians.
+		http.Redirect(w, r, "/child?done=blocked", http.StatusSeeOther)
+	default:
+		http.Redirect(w, r, "/child?done=blocked-unreported", http.StatusSeeOther)
 	}
-	http.Redirect(w, r, "/child?done=blocked-unreported", http.StatusSeeOther)
 }

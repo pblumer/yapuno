@@ -35,7 +35,7 @@ The chat header has a **Melden** button that opens **Melden oder blockieren** fo
 - The server copies exactly the reported message (text, time, sender's display name as known then) into the report store. The child's right to report is the child's right to read: the message is fetched with the child's own session, so contact, profile and device state are checked at that moment. A child cannot report their own message, a message of another conversation, or a message that no longer exists.
 - Only guardians with current contact authority for the **reporting** child see the report: on that child's contact page, under **Meldungen von …**. The family overview shows the number of open reports, never their content.
 - The other family is not informed and cannot see anything.
-- A guardian deletes a report with **Erledigt** (ticked confirmation); the copy of the message is removed from disk. Otherwise a report is deleted after 30 days. The child can have at most 20 open reports.
+- A guardian closes a report with **Erledigt** (ticked confirmation): the copy of the message and the sender's name are removed from disk and guardians no longer see the report. A **marker without content** (which message, when reported, seen and closed) stays until the 30 days are over, so the child keeps its feedback and cannot report the same message again. Otherwise a report is deleted after 30 days. The child can have at most 20 open reports; markers do not count.
 - A report outlives the contact: if the contact is ended and its messages are purged, the guardians still see what was reported until they dismiss it.
 - **Guardians still cannot read chats.** A report is the only path by which a message reaches a guardian, and the child chooses it knowingly, one message at a time.
 
@@ -48,6 +48,14 @@ A report is of little use if nobody looks. When the mailer can send notices (the
 - **At most one e-mail per hour and child.** Further reports within the hour are visible in Yapuno but send nothing. Reporting the same message again is not a new report. If the mail server accepts none of the notices, the hour is not used up and the next report tries again.
 - **In the background:** the child's request returns at once; sending is limited to 15 seconds.
 - **The child is told** on the page, before reporting, that the guardians get an e-mail, that they are reminded if they do not look, and that the message is not in the e-mail. Without a mailer that can send notices the page does not promise any of this. Blocking alone sends no e-mail.
+
+### Feedback to the child
+
+- On **Melden oder blockieren**, a reported message shows **Schon gemeldet** until a guardian has seen the report, and **Deine Eltern haben die Meldung gesehen** afterwards. Closing a report counts as seeing it, and the feedback stays after the report is closed.
+- The feedback appears **only on that page**, next to the message. The start page and the chat show no report status (the chat only has the button that leads to the page), so somebody looking at the child's screen there learns nothing. The other child never sees it.
+- A reported message stays in the list even when newer messages would have pushed it out, so its status remains visible (within the 50 most recent messages of the conversation).
+- Reporting an already reported message again is not confirmed as a new report; the page simply shows the current status.
+- Guardians are told on their page that the child sees when they have looked, and that after **Erledigt** only a marker without the message text remains.
 
 ### Reminders while nobody has looked
 
@@ -66,7 +74,8 @@ A report is of little use if nobody looks. When the mailer can send notices (the
 - Nothing on the reported child's pages changes after a report.
 - Pages for children and guardians contain no script for these functions, load nothing from other origins and use skin tokens only. Message text is rendered as text. Only fixed confirmation texts can be selected by a redirect.
 - Notices: recipients are exactly the guardians who may see the report (tested with an equal second guardian, a helper without contact authority, a guardian of a sibling only, a locked guardian and the other family); only a new report is announced; one notice per hour and child also under concurrent reports; a failed attempt does not use up the hour; a slow mail server does not delay the child; the mail is 7-bit clean, marked as automatic, without link or address, and cannot be bent by a crafted child name.
-- 71 mutations across the predicate, both stores, child pages, guardian pages and wiring: 69 are detected by the tests; 2 are equivalent because the property is checked twice (sequence number zero; a missing session on the safety page). 28 further mutations of the notice code and 33 of the reminder code are all detected.
+- 71 mutations across the predicate, both stores, child pages, guardian pages and wiring: 69 are detected by the tests; 2 are equivalent because the property is checked twice (sequence number zero; a missing session on the safety page). 28 further mutations of the notice code, 33 of the reminder code and 24 of the feedback and marker code are all detected.
+- Feedback: only the reporting child learns that a report was seen, only for that conversation; listing or counting is not seeing; a closed report leaves a marker that fails validation if it still holds text, a name or no seen time; markers are hidden from guardians, never reminded, do not use up the limit of open reports and end with the retention; the start page and the chat never show a report status.
 - Reminders: due exactly at 3 and 24 hours and not a second earlier; never a third; per child and per report; not for seen, dismissed or expired reports; only a guardian with authority for that child can mark its reports as seen (not the other family, not a guardian of a sibling only); a view that shows no report writes nothing; a repeated view rewrites nothing; a failed write changes no state; the page still shows reports when the seen mark cannot be stored.
 
 ## Browser evidence (headless Chromium, not a physical device)
@@ -77,13 +86,16 @@ A second scripted run for the notice, 10 checks passed: the page tells the child
 
 A third scripted run for the reminder, 11 checks passed: the page tells the child about the reminder; no overflow, no clipped text and 44 px targets at 320, 375 and 430 px with the longer sentence; a fresh report is stored as unseen; the family overview and the other family's page leave it unseen; opening the contact page with the report records a time and no person; opening it again changes nothing. The timing itself is covered by tests with a controlled clock, not by the browser run.
 
+A fourth scripted run for the feedback, 14 checks passed: "Schon gemeldet" right after reporting; the guardian opening only the overview changes nothing; after the guardian opened the contact page the child sees "Deine Eltern haben die Meldung gesehen"; no overflow, no clipped text and 44 px targets at 320, 375 and 430 px on the child page and at 320 px on the guardian page; the start page and the chat show nothing; the reported child sees nothing on any page; after **Erledigt** the guardian is told what closing did, the store holds a marker without text or name, and the child keeps the feedback and cannot report that message again.
+
 **Not verified:** physical iPhone/Android, screen readers, large text, landscape, a real mail server and real inboxes (delivery time, spam classification, rendering), and above all **whether children understand the page and would use it** — that needs testing with children and guardians.
 
 ## Limitations
 
 - **Notice and reminders are best effort.** Accepted by the mail server is not read; mail can be delayed, filtered or missed. The child is advised to speak to the guardians as well. There is no push notice.
 - **"Seen" means the page was opened, not that anybody read or acted.** A guardian who opens the contact page for another reason ends the reminders. Seen by one guardian ends them for all.
-- **The child does not learn whether the guardians looked.**
+- **The feedback says "seen", which means the page was opened.** It does not say that the guardians read the message, understood it or will act. A guardian who opens the contact page for another reason also triggers it.
+- **The feedback is lost with the conversation view.** If the contact is ended or blocked, or the message is older than the 50 most recent, the child no longer sees the status.
 - **The hourly limit is kept in memory.** After a restart the next report or reminder goes out even if a mail was sent shortly before. A second, more serious report within the hour sends no mail of its own; it is covered by the reminder 3 hours after it was filed, if still unseen.
 - **Reminders ignore the time of day.** A report filed in the evening can cause a mail at night.
 - **The report file has new fields** (`seen_at`, `reminders`). An older binary refuses a file that contains them, so a rollback needs these fields removed or the file set aside.

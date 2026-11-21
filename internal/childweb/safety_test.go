@@ -374,6 +374,7 @@ type limitedReports struct{ err error }
 
 func (l *limitedReports) File(messages.Principal, string, uint64) (bool, error) { return false, l.err }
 func (l *limitedReports) Reported(contacts.Party, string) map[uint64]bool       { return nil }
+func (l *limitedReports) Seen(contacts.Party, string) map[uint64]bool           { return nil }
 
 func TestSafetyActionsRejectInvalidSubmissions(t *testing.T) {
 	sw := newSafetyWorld(t, true)
@@ -468,5 +469,113 @@ func TestChildIsToldAboutTheEmailOnlyWhenOneIsSent(t *testing.T) {
 	// A notice without a report store makes no sense.
 	if _, err := New(sw.sessions, sw.families, Options{Contacts: sw.contacts, Messages: sw.store, ReportNotices: true}); err == nil {
 		t.Fatal("report notices enabled without reports")
+	}
+}
+
+const seenText = "Deine Eltern haben die Meldung gesehen"
+
+func TestChildSeesOnlyOnTheSafetyPageThatGuardiansHaveSeenTheReport(t *testing.T) {
+	sw := newSafetyWorld(t, true)
+	sw.say(t, alexParty, "eigene")
+	bad := sw.say(t, beaParty, "Das war gemein")
+	other := sw.say(t, beaParty, "bleibt privat")
+	csrf := sw.token(t, sw.alex)
+	if w := sw.act(sw.alex, "report", url.Values{"csrf_token": {csrf}, "seq": {fmt.Sprint(bad)}}, ""); w.Code != http.StatusSeeOther {
+		t.Fatalf("report: %d", w.Code)
+	}
+	before := sw.safety(sw.alex, "").Body.String()
+	if !strings.Contains(before, "Schon gemeldet") || strings.Contains(before, seenText) {
+		t.Fatal("page claims the guardians looked before they did")
+	}
+	if err := sw.reports.MarkSeen("guardian-a", "tenant-a", "child-a"); err != nil {
+		t.Fatal(err)
+	}
+	after := sw.safety(sw.alex, "").Body.String()
+	if strings.Count(after, seenText) != 1 || strings.Contains(after, "Schon gemeldet") {
+		t.Fatal("page does not show that the guardians have seen the report")
+	}
+	if strings.Contains(after, fmt.Sprintf(`name="seq" value="%d"`, bad)) || !strings.Contains(after, fmt.Sprintf(`name="seq" value="%d"`, other)) {
+		t.Fatal("seen report selectable again, or another message not selectable")
+	}
+	// Nowhere else: somebody looking at the start page or the chat learns nothing.
+	for _, path := range []string{"/child", "/child/chat/" + sw.chat} {
+		if body := sw.get(path, sw.alex).Body.String(); strings.Contains(body, "gesehen") || strings.Contains(strings.ToLower(body), "gemeldet") {
+			t.Errorf("%s shows report feedback", path)
+		}
+	}
+	// And never to the other child.
+	for _, path := range []string{"/child", "/child/chat/" + sw.chat, "/child/chat/" + sw.chat + "/safety"} {
+		if body := sw.get(path, sw.bea).Body.String(); strings.Contains(body, seenText) || strings.Contains(body, "Schon gemeldet") {
+			t.Errorf("%s tells the reported child", path)
+		}
+	}
+	// The guardian dismisses the report: the child keeps the feedback and cannot report the message again.
+	list := sw.reportsOf(t, "guardian-a", alexParty)
+	if err := sw.reports.Dismiss("guardian-a", "tenant-a", "child-a", list[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	dismissed := sw.safety(sw.alex, "").Body.String()
+	if strings.Count(dismissed, seenText) != 1 || strings.Contains(dismissed, fmt.Sprintf(`name="seq" value="%d"`, bad)) {
+		t.Fatal("feedback lost after the guardian dismissed the report")
+	}
+	// A stale or hand-made request for that message is not confirmed as a new report.
+	w := sw.act(sw.alex, "report", url.Values{"csrf_token": {csrf}, "seq": {fmt.Sprint(bad)}}, "")
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/child/chat/"+sw.chat+"/safety" {
+		t.Fatalf("repeat after dismissal: %d %q", w.Code, w.Header().Get("Location"))
+	}
+	if len(sw.reportsOf(t, "guardian-a", alexParty)) != 0 {
+		t.Fatal("a dismissed report was reopened")
+	}
+	// With the block ticked, the child is blocked and told only that.
+	w = sw.act(sw.alex, "report", url.Values{"csrf_token": {csrf}, "seq": {fmt.Sprint(bad)}, "block": {"yes"}}, "")
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/child?done=blocked" {
+		t.Fatalf("repeat with block: %d %q", w.Code, w.Header().Get("Location"))
+	}
+	if sw.contacts.Allowed(alexParty, beaParty) {
+		t.Fatal("not blocked although asked")
+	}
+}
+
+func TestRepeatedOpenReportIsNotConfirmedTwice(t *testing.T) {
+	sw := newSafetyWorld(t, true)
+	bad := sw.say(t, beaParty, "einmal reicht")
+	csrf := sw.token(t, sw.alex)
+	form := url.Values{"csrf_token": {csrf}, "seq": {fmt.Sprint(bad)}}
+	if w := sw.act(sw.alex, "report", form, ""); w.Header().Get("Location") != "/child/chat/"+sw.chat+"/safety?done=reported" {
+		t.Fatalf("first report: %q", w.Header().Get("Location"))
+	}
+	if w := sw.act(sw.alex, "report", form, ""); w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/child/chat/"+sw.chat+"/safety" {
+		t.Fatalf("second report: %d %q", w.Code, w.Header().Get("Location"))
+	}
+	if len(sw.reportsOf(t, "guardian-a", alexParty)) != 1 {
+		t.Fatal("duplicate report stored")
+	}
+}
+
+func TestReportedMessageStaysVisibleWhenNewerMessagesFillTheList(t *testing.T) {
+	old := reportChoices
+	reportChoices = 2
+	defer func() { reportChoices = old }()
+	sw := newSafetyWorld(t, true)
+	first := sw.say(t, beaParty, "alte gemeldete Nachricht")
+	unreported := sw.say(t, beaParty, "alte, nicht gemeldete")
+	csrf := sw.token(t, sw.alex)
+	if w := sw.act(sw.alex, "report", url.Values{"csrf_token": {csrf}, "seq": {fmt.Sprint(first)}}, ""); w.Code != http.StatusSeeOther {
+		t.Fatalf("report: %d", w.Code)
+	}
+	sw.say(t, beaParty, "neuer eins")
+	sw.say(t, beaParty, "neuer zwei")
+	if err := sw.reports.MarkSeen("guardian-a", "tenant-a", "child-a"); err != nil {
+		t.Fatal(err)
+	}
+	page := sw.safety(sw.alex, "").Body.String()
+	if !strings.Contains(page, "alte gemeldete Nachricht") || strings.Count(page, seenText) != 1 {
+		t.Fatal("feedback for an older reported message is hidden")
+	}
+	if strings.Contains(page, "alte, nicht gemeldete") || strings.Contains(page, fmt.Sprintf(`name="seq" value="%d"`, unreported)) {
+		t.Fatal("list grew beyond its limit for unreported messages")
+	}
+	if !strings.Contains(page, "neuer eins") || !strings.Contains(page, "neuer zwei") {
+		t.Fatal("newest messages missing")
 	}
 }

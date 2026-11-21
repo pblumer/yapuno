@@ -84,6 +84,8 @@ func TestGuardianSeesExactlyTheReportedMessagesOfTheirChild(t *testing.T) {
 	for _, want := range []string{
 		"Meldungen von Alex", "Nachricht von Bea", "Gemein &lt;script&gt;alert(1)&lt;/script&gt; &amp; &#34;so&#34;", "Zweite Meldung",
 		`action="/family/contacts/report-done"`, "nicht den übrigen Chat", "19.11.2026", "30 Tagen",
+		// Guardians are told what the child learns from their visit.
+		"Alex sieht in Yapuno, dass ihr die Meldung gesehen habt",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q", want)
@@ -153,8 +155,8 @@ func TestGuardianDismissesAReport(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/family/contacts?child_id=child-a&notice=report-done", nil)
 	rec := httptest.NewRecorder()
 	a.ServeHTTP(rec, r)
-	if !strings.Contains(rec.Body.String(), `role="status"`) || !strings.Contains(rec.Body.String(), "Meldung gelöscht") {
-		t.Fatal("dismissal not confirmed")
+	if !strings.Contains(rec.Body.String(), `role="status"`) || !strings.Contains(rec.Body.String(), "Meldung geschlossen") || !strings.Contains(rec.Body.String(), "Kopie der Nachricht ist gelöscht") {
+		t.Fatal("dismissal not confirmed, or confirmed with more than is true")
 	}
 }
 
