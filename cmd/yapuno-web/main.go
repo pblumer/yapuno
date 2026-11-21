@@ -34,6 +34,9 @@ import (
 	"github.com/pblumer/yapuno/internal/reports"
 )
 
+// reminderInterval is how often unseen reports are checked for a due reminder.
+const reminderInterval = 5 * time.Minute
+
 // verifiedSessions invalidates already-issued sessions when guardian identity
 // or their last child-scoped grant has been revoked in the authoritative data.
 type verifiedSessions struct {
@@ -62,6 +65,43 @@ type optionalStores struct {
 	guardianLocks *guardianlock.Store
 	// reports lets children report single messages to their own guardians.
 	reports *reports.Store
+	// now is the clock for report notices and reminders; nil means time.Now.
+	now func() time.Time
+}
+
+// app is the HTTP handler plus the background work that belongs to it.
+type app struct {
+	handler http.Handler
+	// reminder is nil unless guardians are e-mailed about reports.
+	reminder *reports.Reminder
+}
+
+// runner is one pass of periodic work.
+type runner interface {
+	Run(ctx context.Context) int
+}
+
+// remindEvery calls the reminder at a fixed interval until ctx ends.
+func remindEvery(ctx context.Context, r runner, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.Run(ctx)
+		}
+	}
+}
+
+// newHandler builds the application and returns only its HTTP handler.
+func newHandler(origin string, store *familystore.Store, directory *guardiandirectory.Directory, sender guardianlogin.Sender, sessions *guardiansession.Manager, opt optionalStores) (http.Handler, error) {
+	a, err := newApp(origin, store, directory, sender, sessions, opt)
+	if err != nil {
+		return nil, err
+	}
+	return a.handler, nil
 }
 
 // purgingContacts deletes the messages of a contact from disk as soon as a
@@ -82,10 +122,15 @@ func (p purgingContacts) Remove(guardianID, tenantID, childID, linkID string) er
 	return nil
 }
 
-func newHandler(origin string, store *familystore.Store, directory *guardiandirectory.Directory, sender guardianlogin.Sender, sessions *guardiansession.Manager, opt optionalStores) (http.Handler, error) {
+func newApp(origin string, store *familystore.Store, directory *guardiandirectory.Directory, sender guardianlogin.Sender, sessions *guardiansession.Manager, opt optionalStores) (*app, error) {
 	if store == nil || directory == nil || sender == nil || sessions == nil {
 		return nil, errors.New("missing trusted Yapuno dependency")
 	}
+	now := opt.now
+	if now == nil {
+		now = time.Now
+	}
+	var reminder *reports.Reminder
 	if opt.messages != nil && (opt.contacts == nil || opt.pairing == nil) {
 		return nil, errors.New("messaging requires the contact and pairing stores")
 	}
@@ -217,7 +262,7 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 			// do that; the child page then says so. The lock-aware directory
 			// keeps locked guardians out of the recipients.
 			if mailer, ok := sender.(reports.Mailer); ok {
-				announcer, err := reports.NewAnnouncer(store, directory, mailer, time.Now)
+				announcer, err := reports.NewAnnouncer(store, directory, mailer, now)
 				if err != nil {
 					return nil, err
 				}
@@ -226,6 +271,10 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 					return nil, err
 				}
 				childOptions.Reports, childOptions.ReportNotices = notifying, true
+				// Reports no guardian has opened are reminded by a timer.
+				if reminder, err = reports.NewReminder(opt.reports, announcer); err != nil {
+					return nil, err
+				}
 			}
 		}
 		childPages, err := childweb.New(childSessions, store, childOptions)
@@ -237,13 +286,14 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 	}
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/login", http.StatusSeeOther) })
 	// Reject host-header poisoning even behind a TLS-terminating reverse proxy.
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Host != parsed.Host {
 			http.Error(w, "Invalid host", http.StatusMisdirectedRequest)
 			return
 		}
 		mux.ServeHTTP(w, r)
-	}), nil
+	})
+	return &app{handler: handler, reminder: reminder}, nil
 }
 
 func main() {
@@ -335,7 +385,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	handler, err := newHandler(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore})
+	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}
@@ -343,9 +393,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 16}
+	server := &http.Server{Handler: application.handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 16}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if application.reminder != nil {
+		go remindEvery(ctx, application.reminder, reminderInterval)
+	}
 	go func() {
 		<-ctx.Done()
 		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

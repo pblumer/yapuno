@@ -69,6 +69,26 @@ type record struct {
 	Body       string    `json:"body"`
 	SentAt     time.Time `json:"sent_at"`
 	ReportedAt time.Time `json:"reported_at"`
+	// SeenAt is when a guardian of the reporting child first opened the page
+	// that shows this report. It records a time, not who looked.
+	SeenAt *time.Time `json:"seen_at,omitempty"`
+	// Reminders counts the reminder stages already sent for this report.
+	Reminders int `json:"reminders,omitempty"`
+}
+
+// ReminderAfter lists how long after a report its guardians are reminded
+// while no guardian has seen it. There is one reminder per entry.
+var ReminderAfter = []time.Duration{3 * time.Hour, 24 * time.Hour}
+
+// stage is the number of reminder times this report has passed.
+func (r record) stage(now time.Time) int {
+	n := 0
+	for _, after := range ReminderAfter {
+		if now.Sub(r.ReportedAt) >= after {
+			n++
+		}
+	}
+	return n
 }
 
 type document struct {
@@ -130,7 +150,8 @@ func Open(path string, msgs Messages, families Families, now func() time.Time) (
 	for _, r := range doc.Reports {
 		key := r.Reporter.TenantID + "\x00" + r.Reporter.ChildID + "\x00" + r.Conversation + "\x00" + fmt.Sprint(r.Seq)
 		if len(r.ID) != 32 || !validParty(r.Reporter) || !validParty(r.Sender) || r.Reporter == r.Sender ||
-			r.Conversation == "" || r.Seq == 0 || r.ReportedAt.IsZero() || seen["id:"+r.ID] || seen[key] {
+			r.Conversation == "" || r.Seq == 0 || r.ReportedAt.IsZero() || seen["id:"+r.ID] || seen[key] ||
+			r.Reminders < 0 || r.Reminders > len(ReminderAfter) {
 			return nil, fmt.Errorf("%w: report record", ErrInvalid)
 		}
 		seen["id:"+r.ID], seen[key] = true, true
@@ -350,4 +371,85 @@ func (s *Store) Reported(p contacts.Party, conversationID string) map[uint64]boo
 		}
 	}
 	return out
+}
+
+// MarkSeen records that a guardian with current contact authority for this
+// child opened the page showing the child's reports. Reports seen once are
+// never reminded again. Listing or counting reports does not mark them.
+func (s *Store) MarkSeen(guardian, tenant, child string) error {
+	party := contacts.Party{TenantID: tenant, ChildID: child}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.allowed(guardian, party) {
+		return ErrForbidden
+	}
+	now := s.now().UTC()
+	next := append([]record(nil), s.records...)
+	changed := false
+	for i, r := range next {
+		if r.Reporter == party && r.SeenAt == nil && s.live(r) {
+			seen := now
+			next[i].SeenAt = &seen
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if err := s.commit(next); err != nil {
+		return ErrUnavailable
+	}
+	return nil
+}
+
+// due reports whether a reminder stage is reached that was not sent yet.
+func (s *Store) due(r record, now time.Time) bool {
+	return r.SeenAt == nil && s.live(r) && r.stage(now) > r.Reminders
+}
+
+// RemindersDue lists the children with at least one report that no guardian
+// has seen and whose next reminder time has passed, in a stable order.
+func (s *Store) RemindersDue() []contacts.Party {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	seen := map[contacts.Party]bool{}
+	var out []contacts.Party
+	for _, r := range s.records {
+		if s.due(r, now) && !seen[r.Reporter] {
+			seen[r.Reporter] = true
+			out = append(out, r.Reporter)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].TenantID != out[j].TenantID {
+			return out[i].TenantID < out[j].TenantID
+		}
+		return out[i].ChildID < out[j].ChildID
+	})
+	return out
+}
+
+// MarkReminded records that the guardians of this child were reminded now.
+// Every unseen report of the child is brought up to its current stage, so an
+// old report is reminded once and not once per missed stage.
+func (s *Store) MarkReminded(child contacts.Party) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	next := append([]record(nil), s.records...)
+	changed := false
+	for i, r := range next {
+		if r.Reporter == child && s.due(r, now) {
+			next[i].Reminders = r.stage(now)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if err := s.commit(next); err != nil {
+		return ErrUnavailable
+	}
+	return nil
 }

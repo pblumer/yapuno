@@ -460,7 +460,7 @@ func TestChildIsToldAboutTheEmailOnlyWhenOneIsSent(t *testing.T) {
 	}
 	sw.handler = h
 	loud := sw.safety(sw.alex, "").Body.String()
-	for _, want := range []string{"Yapuno schreibt deinen Eltern eine E-Mail", "steht nicht in der E-Mail", "Sag es ihnen am besten auch selbst"} {
+	for _, want := range []string{"Yapuno schreibt deinen Eltern eine E-Mail", "erinnert sie", "steht nicht in der E-Mail", "Sag es ihnen am besten auch selbst"} {
 		if !strings.Contains(loud, want) {
 			t.Errorf("missing %q", want)
 		}

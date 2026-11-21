@@ -34,6 +34,9 @@ type ContactStore interface {
 type ReportStore interface {
 	ForChild(guardianID, tenantID, childID string) ([]reports.Report, error)
 	Dismiss(guardianID, tenantID, childID, reportID string) error
+	// MarkSeen records that a guardian opened the page showing this child's
+	// reports, which ends reminders for them.
+	MarkSeen(guardianID, tenantID, childID string) error
 }
 
 // ReportCounter tells the family overview how many reports are open.
@@ -317,7 +320,7 @@ func (h *contactHandler) render(w http.ResponseWriter, p Session, child string, 
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	_ = contactPage.Execute(w, struct {
+	err = contactPage.Execute(w, struct {
 		Skin, Name, Child, CSRF, Alert, Notice string
 		CSS                                    template.CSS
 		View                                   contacts.Overview
@@ -325,6 +328,11 @@ func (h *contactHandler) render(w http.ResponseWriter, p Session, child string, 
 		RetentionDays                          int
 	}{Skin: skinID, Name: name, Child: child, CSRF: p.CSRFToken, Alert: alert, Notice: notice, CSS: css, View: view,
 		Reports: reported, RetentionDays: int(reports.Retention / (24 * time.Hour))})
+	if err == nil && len(reported) > 0 {
+		// The guardian has been shown these reports: no more reminders. If
+		// this cannot be recorded, a reminder too many is the safe failure.
+		_ = h.reports.MarkSeen(p.GuardianID, p.TenantID, child)
+	}
 }
 
 // reportView is one reported message as shown to the reporting child's

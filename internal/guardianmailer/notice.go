@@ -73,12 +73,42 @@ func printableName(name string) (string, bool) {
 	return name, true
 }
 
-func reportNotice(from, to, childName string) string {
-	subject, object := "Dein Kind", "deinem Kind"
+// reminderText is sent while no guardian has opened the page with the
+// report. It follows the same rules as reportText.
+const reminderText = `Hallo
+
+%[1]s hat in Yapuno eine Nachricht gemeldet. Die Meldung wurde noch nicht angesehen.
+
+So siehst du die Meldung:
+- Melde dich wie gewohnt bei Yapuno an. Diese Nachricht enthält absichtlich keinen Link.
+- Öffne unter «Familie» die Kontakte von %[2]s. Dort steht die gemeldete Nachricht.
+
+Sobald ein Elternteil die Meldung angesehen hat, erinnert Yapuno nicht mehr. Es gibt höchstens zwei Erinnerungen pro Meldung.
+`
+
+// childWords returns how the texts refer to the child: by name, or neutrally
+// when the name is not safe to print.
+func childWords(childName string) (subject, object string) {
 	if name, ok := printableName(childName); ok {
-		subject, object = name, name
+		return name, name
 	}
+	return "Dein Kind", "deinem Kind"
+}
+
+func reportNotice(from, to, childName string) string {
+	subject, object := childWords(childName)
 	return notice(from, to, "Yapuno: Eine Meldung wartet auf dich", fmt.Sprintf(reportText, subject, object))
+}
+
+func reportReminder(from, to, childName string) string {
+	subject, object := childWords(childName)
+	return notice(from, to, "Yapuno: Eine Meldung wartet noch auf dich", fmt.Sprintf(reminderText, subject, object))
+}
+
+// SendReportReminder tells one verified guardian address that a report of
+// their own child has not been looked at yet.
+func (s *Sender) SendReportReminder(ctx context.Context, email, childName string) error {
+	return s.deliver(ctx, email, reportReminder(s.cfg.From, email, childName))
 }
 
 // SendReportNotice tells one verified guardian address that their own child

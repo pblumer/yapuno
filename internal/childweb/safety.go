@@ -103,7 +103,7 @@ var safetyPage = template.Must(template.New("child-safety").Parse(`<!doctype htm
 {{end}}{{end}}</fieldset>
 {{if .Selectable}}<label class="yp-check"><input type="checkbox" name="block" value="yes"> <span>Ausserdem {{.Peer}} blockieren.</span></label>
 <button class="yp-primary" type="submit">Diese Nachricht melden</button>{{end}}</form>
-<p class="yp-muted">Deine Eltern sehen die Meldung, wenn sie Yapuno öffnen.{{if .Notices}} Yapuno schreibt deinen Eltern eine E-Mail, dass du etwas gemeldet hast. Die Nachricht selbst steht nicht in der E-Mail.{{end}} Sag es ihnen am besten auch selbst.</p>
+<p class="yp-muted">Deine Eltern sehen die Meldung, wenn sie Yapuno öffnen.{{if .Notices}} Yapuno schreibt deinen Eltern eine E-Mail, dass du etwas gemeldet hast, und erinnert sie, falls sie die Meldung nicht ansehen. Die Nachricht selbst steht nicht in der E-Mail.{{end}} Sag es ihnen am besten auch selbst.</p>
 {{else}}<p class="yp-muted">{{.Peer}} hat dir hier noch nichts geschrieben.</p>{{end}}</section>{{end}}
 <section aria-labelledby="yp-block"><h2 id="yp-block">{{.Peer}} blockieren</h2>
 <ul class="yp-facts"><li>Ihr könnt euch nicht mehr schreiben.</li><li>Der Chat verschwindet.</li><li>Nur deine Eltern können das wieder aufheben.</li><li>Deine Eltern sehen, dass du blockiert hast, aber keine Nachrichten.</li></ul>

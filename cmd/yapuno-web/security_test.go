@@ -29,7 +29,8 @@ type noticeMailer struct {
 	links   map[string]string
 	notices []string
 	// reportNotices holds "address about child name" for every report notice.
-	reportNotices []string
+	reportNotices   []string
+	reportReminders []string
 }
 
 func (m *noticeMailer) SendSignInLink(_ context.Context, email, link string) error {
@@ -54,6 +55,21 @@ func (m *noticeMailer) SendReportNotice(_ context.Context, email, childName stri
 	defer m.mu.Unlock()
 	m.reportNotices = append(m.reportNotices, email+" about "+childName)
 	return nil
+}
+
+func (m *noticeMailer) SendReportReminder(_ context.Context, email, childName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reportReminders = append(m.reportReminders, email+" about "+childName)
+	return nil
+}
+
+func (m *noticeMailer) reminders() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	got := append([]string(nil), m.reportReminders...)
+	sort.Strings(got)
+	return got
 }
 
 // reports waits briefly for background mail and returns what was sent, sorted.

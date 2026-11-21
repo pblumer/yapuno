@@ -49,10 +49,12 @@ func (f fakeAddresses) Email(_ context.Context, guardianID, tenantID string) (st
 type sentNotice struct{ to, child string }
 
 type fakeNoticeMailer struct {
-	mu    sync.Mutex
-	sent  []sentNotice
-	fail  map[string]bool
-	block bool
+	mu   sync.Mutex
+	sent []sentNotice
+	// reminders are kept apart from first notices.
+	reminders []sentNotice
+	fail      map[string]bool
+	block     bool
 }
 
 func (m *fakeNoticeMailer) SendReportNotice(ctx context.Context, email, childName string) error {
@@ -67,6 +69,28 @@ func (m *fakeNoticeMailer) SendReportNotice(ctx context.Context, email, childNam
 	}
 	m.sent = append(m.sent, sentNotice{email, childName})
 	return nil
+}
+
+func (m *fakeNoticeMailer) SendReportReminder(ctx context.Context, email, childName string) error {
+	if m.block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.fail[email] {
+		return errors.New("smtp rejected")
+	}
+	m.reminders = append(m.reminders, sentNotice{email, childName})
+	return nil
+}
+
+func (m *fakeNoticeMailer) reminded() []sentNotice {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := append([]sentNotice(nil), m.reminders...)
+	sort.Slice(out, func(i, j int) bool { return out[i].to < out[j].to })
+	return out
 }
 
 func (m *fakeNoticeMailer) list() []sentNotice {
