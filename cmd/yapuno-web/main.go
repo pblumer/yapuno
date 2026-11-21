@@ -213,6 +213,20 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 		}
 		if opt.reports != nil {
 			childOptions.Reports = opt.reports
+			// Guardians are e-mailed about a new report when the mailer can
+			// do that; the child page then says so. The lock-aware directory
+			// keeps locked guardians out of the recipients.
+			if mailer, ok := sender.(reports.Mailer); ok {
+				announcer, err := reports.NewAnnouncer(store, directory, mailer, time.Now)
+				if err != nil {
+					return nil, err
+				}
+				notifying, err := reports.WithNotices(opt.reports, announcer)
+				if err != nil {
+					return nil, err
+				}
+				childOptions.Reports, childOptions.ReportNotices = notifying, true
+			}
 		}
 		childPages, err := childweb.New(childSessions, store, childOptions)
 		if err != nil {

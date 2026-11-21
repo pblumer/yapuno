@@ -39,6 +39,16 @@ The chat header has a **Melden** button that opens **Melden oder blockieren** fo
 - A report outlives the contact: if the contact is ended and its messages are purged, the guardians still see what was reported until they dismiss it.
 - **Guardians still cannot read chats.** A report is the only path by which a message reaches a guardian, and the child chooses it knowingly, one message at a time.
 
+## Notice to guardians
+
+A report is of little use if nobody looks. When the mailer can send notices (the built-in SMTP mailer can), a newly filed report triggers an e-mail to the guardians who may see it.
+
+- **Recipients:** guardians with current contact authority for the reporting child, active in the guardian directory and not [locked](guardian-account-safety.md). Not the other family, not a guardian who only manages devices or only a sibling.
+- **Content:** the text names the reporting child and nobody else. No message text, no other child, no link. The subject, which shows on lock screens, names nobody. An unusual child name (control characters, over-long) is replaced by "Dein Kind".
+- **At most one e-mail per hour and child.** Further reports within the hour are visible in Yapuno but send nothing. Reporting the same message again is not a new report. If the mail server accepts none of the notices, the hour is not used up and the next report tries again.
+- **In the background:** the child's request returns at once; sending is limited to 15 seconds.
+- **The child is told** on the page, before reporting, that the guardians get an e-mail and that the message is not in it. Without a mailer that can send notices the page does not promise one. Blocking alone sends no e-mail.
+
 ## Security and privacy properties (tested)
 
 - Identity comes from the verified child or guardian session only; identity fields in forms are ignored. CSRF token, form-only content type, 4 KiB body limit, exactly one value per field, explicit confirmation for blocking, lifting a block and deleting a report.
@@ -47,17 +57,22 @@ The chat header has a **Melden** button that opens **Melden oder blockieren** fo
 - Reports: visible to and deletable by guardians of the reporting child only (tenant- and child-scoped, checked on every call); the store holds the reported text and nothing else of the conversation; reporting the same message twice keeps one report; a neighbouring message is never substituted for a missing one; a failed write stores nothing and is reported as failure; the store fails closed on corrupt or insecure files.
 - Nothing on the reported child's pages changes after a report.
 - Pages for children and guardians contain no script for these functions, load nothing from other origins and use skin tokens only. Message text is rendered as text. Only fixed confirmation texts can be selected by a redirect.
-- 71 mutations across the predicate, both stores, child pages, guardian pages and wiring: 69 are detected by the tests; 2 are equivalent because the property is checked twice (sequence number zero; a missing session on the safety page).
+- Notices: recipients are exactly the guardians who may see the report (tested with an equal second guardian, a helper without contact authority, a guardian of a sibling only, a locked guardian and the other family); only a new report is announced; one notice per hour and child also under concurrent reports; a failed attempt does not use up the hour; a slow mail server does not delay the child; the mail is 7-bit clean, marked as automatic, without link or address, and cannot be bent by a crafted child name.
+- 71 mutations across the predicate, both stores, child pages, guardian pages and wiring: 69 are detected by the tests; 2 are equivalent because the property is checked twice (sequence number zero; a missing session on the safety page). 28 further mutations of the notice code are all detected.
 
 ## Browser evidence (headless Chromium, not a physical device)
 
 One scripted run through the real server over TLS with two children and both guardians, repeated with the `classic` and `night` guardian skins, 35 checks passed each: the header button is a 44 px target without overflow at 320 px; the page offers only the other child's messages, newest first; hostile message text stays inert on the child page and on the guardian page; no overflow, no clipped text and 44 px targets at 320, 375 and 430 px on the child page and the guardian contact page; keyboard reaches every control with a visible focus ring; nothing happens without a chosen message or a ticked confirmation; the guardian sees exactly the reported message and the other family nothing; after a block the other child's open chat ended in about 2 seconds with the neutral text and their start page showed no hint; the other family saw a neutral pause without a way to lift it; the blocking child's guardian lifted the block and the conversation returned with its history; report and block in one step with JavaScript disabled; no request left the own origin.
 
-**Not verified:** physical iPhone/Android, screen readers, large text, landscape, and above all **whether children understand the page and would use it** — that needs testing with children and guardians.
+A second scripted run for the notice, 10 checks passed: the page tells the child about the e-mail and what it does not contain; no overflow, no clipped text and 44 px targets at 320, 375 and 430 px with the added sentence; no mail before a report; one notice to the reporting child's guardian naming only that child; the child's request took well under a second; a second report within the hour sent no second mail while both reports were visible to the guardian.
+
+**Not verified:** physical iPhone/Android, screen readers, large text, landscape, a real mail server and real inboxes (delivery time, spam classification, rendering), and above all **whether children understand the page and would use it** — that needs testing with children and guardians.
 
 ## Limitations
 
-- **Guardians are not notified.** A report waits until a guardian opens Yapuno; the child is told so and advised to speak to them. There is no e-mail or push notice.
+- **The notice is best effort.** Accepted by the mail server is not read; mail can be delayed, filtered or missed. The child is advised to speak to the guardians as well. There is no push notice and no reminder if a report stays open.
+- **The hourly limit is kept in memory.** After a restart the next report is announced even if one was announced shortly before. A second, more serious report within the hour sends no mail.
+- **The e-mail leaves Yapuno.** The mail provider learns that this address belongs to a guardian of a child with that first name who reported something.
 - **No operator or moderator sees a report.** There is no escalation path for serious cases, no evidence hold beyond the guardians' own view and no process for the reported child's family.
 - **A blocked child can still guess** that they were blocked, and both children can still meet outside Yapuno.
 - Only the 20 most recent messages of the other child can be picked. There is no free-text reason and no report of a whole conversation or of a contact as such.
