@@ -29,8 +29,9 @@ All state lives in one private directory (mode `0700`). The two required files a
 | `YAPUNO_APPEARANCE_FILE` | "Mein Look" (themes and figures) | |
 | `YAPUNO_REPORTS_FILE` | reporting, e-mail notice, reminders | messages |
 | `YAPUNO_GUARDIAN_LOCKS_FILE` | emergency lock of a guardian's access | |
+| `YAPUNO_SIGNUP_FILE` | optional: families register through an invitation and create child profiles ([details](invited-self-registration.md)); guardianship is then self-declared | |
 
-For the trial set all of them.
+For the trial set all of them. `YAPUNO_SIGNUP_FILE` is the exception: set it only if further families should register themselves instead of being provisioned.
 
 ## Provisioning the families
 
@@ -56,6 +57,10 @@ yapuno-provision -verified -add -families private/families.json -guardians priva
 ```
 
 `-add` never changes or removes what exists and prints `changed: …` or `unchanged`, so it can be repeated; `-add -dry-run` prints `would change: …` without writing. It refuses an address that already belongs to another guardian, an existing guardian given another address, and files or directories that are not private. A child that exists keeps its current name. `-verified` remains the operator's confirmation that identities were checked and the profiles are synthetic.
+
+### Alternative: let further families register themselves
+
+With `YAPUNO_SIGNUP_FILE` only the first family needs provisioning. Its guardian opens **Familie → Eine Familie einladen**, creates a link and passes it on; the invited person registers with their own address and the first child's name, and adds further children under **Weiteres Kind anlegen**. A second guardian for a child still needs `-add`. See [invited self-registration](invited-self-registration.md) for the limits, above all that guardianship is not checked.
 
 ## Test script
 

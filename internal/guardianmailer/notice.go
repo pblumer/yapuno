@@ -2,6 +2,7 @@ package guardianmailer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"mime/quotedprintable"
 	"strings"
@@ -121,4 +122,41 @@ func (s *Sender) SendReportNotice(ctx context.Context, email, childName string) 
 // guardian of the same child locked their own access.
 func (s *Sender) SendAccessLockNotice(ctx context.Context, email string) error {
 	return s.deliver(ctx, email, accessLockNotice(s.cfg.From, email))
+}
+
+// registrationText asks an invited person to confirm their address. Unlike
+// the security notices it must carry a link: following it is the proof of
+// control over the mailbox. It names nobody.
+const registrationText = `Hallo
+
+Du wurdest zu Yapuno eingeladen und hast diese E-Mail-Adresse angegeben. Mit diesem Link bestätigst du die Adresse und legst deine Familie an:
+
+%s
+
+Der Link gilt 10 Minuten und nur einmal.
+
+Hast du das nicht selbst angefordert, ignoriere diese Nachricht. Ohne den Link wird nichts angelegt.
+`
+
+func registrationMail(from, to, link string) (string, error) {
+	// The server builds the link itself; still require plain HTTPS text.
+	if !strings.HasPrefix(link, "https://") || strings.ContainsAny(link, " \t\r\n\x00<>\"") {
+		return "", errors.New("invalid registration URL")
+	}
+	for _, r := range link {
+		if r > unicode.MaxASCII || unicode.IsControl(r) {
+			return "", errors.New("invalid registration URL")
+		}
+	}
+	return notice(from, to, "Yapuno: Deine Einladung", fmt.Sprintf(registrationText, link)), nil
+}
+
+// SendRegistrationLink sends the confirmation link of an invited
+// registration. Never print the link to logs.
+func (s *Sender) SendRegistrationLink(ctx context.Context, email, link string) error {
+	message, err := registrationMail(s.cfg.From, email, link)
+	if err != nil {
+		return err
+	}
+	return s.deliver(ctx, email, message)
 }

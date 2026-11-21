@@ -20,6 +20,7 @@ var (
 	ErrInvalid   = errors.New("invalid family profile")
 	ErrDuplicate = errors.New("duplicate family profile")
 	ErrForbidden = errors.New("guardian is not authorized for this child")
+	ErrLimit     = errors.New("family is at its limit")
 )
 
 type State struct {
@@ -79,6 +80,9 @@ func validate(s State) error {
 // Validate reports whether a state would be accepted by the store. It lets
 // offline provisioning check input before anything is written.
 func Validate(s State) error { return validate(s) }
+
+// ValidName reports whether a display name would be accepted for a child.
+func ValidName(name string) bool { return validName(name) }
 
 func validName(name string) bool {
 	name = strings.TrimSpace(name)
