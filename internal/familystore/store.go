@@ -76,6 +76,10 @@ func validate(s State) error {
 	return nil
 }
 
+// Validate reports whether a state would be accepted by the store. It lets
+// offline provisioning check input before anything is written.
+func Validate(s State) error { return validate(s) }
+
 func validName(name string) bool {
 	name = strings.TrimSpace(name)
 	return utf8.ValidString(name) && utf8.RuneCountInString(name) >= 1 && utf8.RuneCountInString(name) <= 40 && !strings.ContainsAny(name, "<>\r\n\x00")

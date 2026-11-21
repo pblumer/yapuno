@@ -34,6 +34,9 @@ Both files are created with `0600` permissions; existing files are
 never overwritten. The command is for **first** bootstrap only and runs
 offline. There is no untrusted user-facing guardian registration endpoint.
 
+Further families, children and guardians are added with `-add` while the
+server is stopped; see the [trial run with two families](trial-run.md).
+
 4. Configure a real SMTP service that supports **implicit TLS** on port
    465 and provide a canonical, publicly resolvable **HTTPS** origin.
    Configure credentials via the environment, not command-line arguments:

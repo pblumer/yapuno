@@ -35,7 +35,8 @@ An invitation-only email-link flow is available as an **internal component** in 
 
 A startable guardian login and family dashboard are available as an **engineering
 preview for synthetic profiles** only. The `cmd/yapuno-provision` offline CLI
-provisions a verified guardian and example child, while `cmd/yapuno-web`
+provisions a verified guardian and example child and, with `-add`, further
+families, children and guardians ([trial run with two families](docs/planning/trial-run.md)), while `cmd/yapuno-web`
 connects passwordless email links, mandatory-TLS SMTP, opaque sessions and
 live authorization checks to the family UI.
 
