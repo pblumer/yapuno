@@ -32,6 +32,7 @@ import (
 	"github.com/pblumer/yapuno/internal/messages"
 	"github.com/pblumer/yapuno/internal/pairingweb"
 	"github.com/pblumer/yapuno/internal/reports"
+	"github.com/pblumer/yapuno/internal/signup"
 )
 
 // reminderInterval is how often unseen reports are checked for a due reminder.
@@ -65,6 +66,10 @@ type optionalStores struct {
 	guardianLocks *guardianlock.Store
 	// reports lets children report single messages to their own guardians.
 	reports *reports.Store
+	// signup switches invited self-registration on: guardians invite other
+	// families, who register themselves and create their own child profiles.
+	// Guardianship is then self-declared; see docs/adr/draft-invited-self-registration.md.
+	signup *signup.Store
 	// now is the clock for report notices and reminders; nil means time.Now.
 	now func() time.Time
 }
@@ -168,6 +173,15 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 	if opt.reports != nil {
 		familyOptions.Reports = opt.reports
 	}
+	var registrationMailer signup.Mailer
+	if opt.signup != nil {
+		mailer, ok := sender.(signup.Mailer)
+		if !ok {
+			return nil, errors.New("self-registration requires a mailer that can send registration links")
+		}
+		registrationMailer = mailer
+		familyOptions.Children, familyOptions.InvitePages = store, true
+	}
 	family, err := familyweb.NewWithOptions(auth, store, familyOptions)
 	if err != nil {
 		return nil, err
@@ -198,6 +212,22 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 	}
 	mux.Handle("/family/security", securityRoutes)
 	mux.Handle("/family/security/", securityRoutes)
+	if opt.signup != nil {
+		// The lock-aware directory voids invitations of locked guardians.
+		join, err := signup.New(signup.Config{Origin: origin, Store: opt.signup, Directory: directory, Families: store, Mailer: registrationMailer, Sessions: sessions, Now: time.Now})
+		if err != nil {
+			return nil, err
+		}
+		joinRoutes := join.Routes()
+		mux.Handle("/join", joinRoutes)
+		mux.Handle("/join/", joinRoutes)
+		inviteRoutes, err := familyweb.NewInvitePages(auth, opt.signup, store, origin, looks)
+		if err != nil {
+			return nil, err
+		}
+		mux.Handle("/family/invite", inviteRoutes)
+		mux.Handle("/family/invite/", inviteRoutes)
+	}
 	if opt.appearance != nil {
 		lookRoutes, err := familyweb.NewLookPages(auth, opt.appearance)
 		if err != nil {
@@ -306,6 +336,7 @@ func main() {
 	messagesPath := flag.String("messages", os.Getenv("YAPUNO_MESSAGES_FILE"), "optional private message log; requires pairing and contacts")
 	reportsPath := flag.String("reports", os.Getenv("YAPUNO_REPORTS_FILE"), "optional private file for messages children report to their guardians; requires messages")
 	guardianLocksPath := flag.String("guardian-locks", os.Getenv("YAPUNO_GUARDIAN_LOCKS_FILE"), "optional private file for emergency locks of guardian access")
+	signupPath := flag.String("signup", os.Getenv("YAPUNO_SIGNUP_FILE"), "optional private invitation file; switches invited self-registration on (guardianship is then self-declared)")
 	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
 	flag.Parse()
 	host, _, err := net.SplitHostPort(*listen)
@@ -372,6 +403,14 @@ func main() {
 			log.Fatal("guardian lock store unavailable or insecure")
 		}
 	}
+	var signupStore *signup.Store
+	if *signupPath != "" {
+		signupStore, err = signup.Open(*signupPath, time.Now)
+		if err != nil {
+			log.Fatal("invitation store unavailable, insecure or corrupt")
+		}
+		log.Printf("invited self-registration is ON: guardianship is self-declared and not verified; use synthetic profiles only")
+	}
 	smtpPort := 465
 	sender, err := guardianmailer.New(guardianmailer.Config{
 		Host: os.Getenv("YAPUNO_SMTP_HOST"), Port: smtpPort,
@@ -385,7 +424,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore})
+	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}

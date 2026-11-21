@@ -64,6 +64,17 @@ See [the three steps and their limits](docs/planning/guardian-account-safety.md)
 and the [proposed ADR](docs/adr/draft-guardian-access-lock.md).
 **Browser key-based child enrollment and explicit guardian fingerprint approval are now wired** using a short-lived invitation link. **Locally rendered QR images and a child scanner page** are now included. The scanner supports the browser's BarcodeDetector where available, otherwise the native phone camera or a shared link. Messaging authorization and real iPhone/Android tests are still open. See [the browser pairing flow](docs/planning/browser-device-pairing.md).
 
+## Invited self-registration (preview, off by default)
+
+With `YAPUNO_SIGNUP_FILE`, a signed-in guardian creates a one-time invitation
+link; whoever opens it registers their own family with an e-mail address they
+control, and creates child profiles themselves. Nobody registers without an
+invitation, registration reveals nothing about other families, and it connects
+no children. **Guardianship is then self-declared and not checked**, so the
+switch is for trials with synthetic profiles only. See
+[the flow and its limits](docs/planning/invited-self-registration.md) and the
+[proposed ADR](docs/adr/draft-invited-self-registration.md).
+
 ## Messaging (preview)
 
 With `YAPUNO_MESSAGES_FILE` (plus pairing and contacts), two children whose

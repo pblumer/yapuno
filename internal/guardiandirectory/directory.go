@@ -10,13 +10,19 @@ import (
 	"io"
 	"net/mail"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/pblumer/yapuno/internal/familydashboard"
 	"github.com/pblumer/yapuno/internal/guardianlogin"
 )
 
-var ErrUnavailable = errors.New("verified guardian directory unavailable")
+var (
+	ErrUnavailable = errors.New("verified guardian directory unavailable")
+	ErrInvalid     = errors.New("invalid guardian identity")
+	ErrExists      = errors.New("guardian identity already exists")
+)
 
 type Entry struct {
 	Email      string `json:"email"`
@@ -36,10 +42,16 @@ type FamilyReader interface {
 // Directory reloads its private, operator-provisioned file on every lookup,
 // including authorization checks for existing sessions. A missing, malformed,
 // symlinked or incorrectly permissioned file fails closed.
+// maxFileSize bounds the directory file for reading and for writing.
+const maxFileSize = 1 << 20
+
 type Directory struct {
 	path     string
 	families FamilyReader
 	locks    LockReader
+	// writes serializes Register and Unregister in this process. Copies made
+	// by WithLocks share it.
+	writes *sync.Mutex
 }
 
 // LockReader reports emergency locks of guardian access. A locked guardian
@@ -63,7 +75,7 @@ func (d *Directory) WithLocks(locks LockReader) (*Directory, error) {
 	if locks == nil {
 		return nil, ErrUnavailable
 	}
-	return &Directory{path: d.path, families: d.families, locks: locks}, nil
+	return &Directory{path: d.path, families: d.families, locks: locks, writes: d.writes}, nil
 }
 
 func (d *Directory) locked(guardianID, tenantID string) bool {
@@ -74,7 +86,7 @@ func New(path string, families FamilyReader) (*Directory, error) {
 	if path == "" || families == nil {
 		return nil, ErrUnavailable
 	}
-	d := &Directory{path: path, families: families}
+	d := &Directory{path: path, families: families, writes: &sync.Mutex{}}
 	if _, err := d.read(); err != nil {
 		return nil, err
 	}
@@ -106,8 +118,8 @@ func (d *Directory) read() ([]Entry, error) {
 	if err != nil || !opened.Mode().IsRegular() || opened.Mode().Perm()&0077 != 0 || !os.SameFile(stat, opened) {
 		return nil, ErrUnavailable
 	}
-	content, err := io.ReadAll(io.LimitReader(f, 1<<20+1))
-	if err != nil || len(content) > 1<<20 {
+	content, err := io.ReadAll(io.LimitReader(f, maxFileSize+1))
+	if err != nil || len(content) > maxFileSize {
 		return nil, ErrUnavailable
 	}
 	dec := json.NewDecoder(bytes.NewReader(content))
@@ -199,4 +211,91 @@ func (d *Directory) Email(ctx context.Context, guardianID, tenantID string) (str
 		}
 	}
 	return "", false
+}
+
+// Has reports whether an address is already in the directory, active or not.
+// An unreadable directory counts as "in use", so nothing is registered on top
+// of a file that cannot be trusted.
+func (d *Directory) Has(email string) bool {
+	normalized, ok := normalize(email)
+	if !ok {
+		return true
+	}
+	entries, err := d.read()
+	if err != nil {
+		return true
+	}
+	for _, e := range entries {
+		if e.Email == normalized {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *Directory) write(entries []Entry) error {
+	data, err := json.Marshal(document{Guardians: entries})
+	if err != nil {
+		return err
+	}
+	// read refuses larger files, and an unreadable directory locks everyone out.
+	if len(data)+1 > maxFileSize {
+		return errors.New("guardian directory is full")
+	}
+	dir := filepath.Dir(d.path)
+	f, err := os.CreateTemp(dir, ".yapuno-guardians-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if err := f.Chmod(0600); err != nil {
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(f.Name(), d.path); err != nil {
+		return err
+	}
+	if handle, err := os.Open(dir); err == nil {
+		defer handle.Close()
+		return handle.Sync()
+	}
+	return nil
+}
+
+// Register adds an active guardian identity. It is a trusted call: the
+// caller must have proven control of the address with a one-time link and
+// must be allowed to create this guardian. The identity is admitted for
+// sign-in only once it also holds a child grant in the family store.
+func (d *Directory) Register(email, guardianID, tenantID string) error {
+	normalized, ok := normalize(email)
+	if !ok || guardianID == "" || tenantID == "" || strings.ContainsAny(guardianID+tenantID, "\x00\r\n") {
+		return ErrInvalid
+	}
+	d.writes.Lock()
+	defer d.writes.Unlock()
+	entries, err := d.read()
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.Email == normalized || (e.TenantID == tenantID && e.GuardianID == guardianID) {
+			return ErrExists
+		}
+	}
+	next := append(append([]Entry{}, entries...), Entry{Email: normalized, GuardianID: guardianID, TenantID: tenantID, Active: true})
+	if err := d.write(next); err != nil {
+		return ErrUnavailable
+	}
+	return nil
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/pblumer/yapuno/internal/guardiandirectory"
 	"github.com/pblumer/yapuno/internal/guardianlock"
 	"github.com/pblumer/yapuno/internal/guardiansession"
+	"github.com/pblumer/yapuno/internal/signup"
 )
 
 // noticeMailer records sign-in links and lock notices per address.
@@ -31,6 +32,24 @@ type noticeMailer struct {
 	// reportNotices holds "address about child name" for every report notice.
 	reportNotices   []string
 	reportReminders []string
+	// registrations holds the confirmation link per invited address.
+	registrations map[string]string
+}
+
+func (m *noticeMailer) SendRegistrationLink(_ context.Context, email, link string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.registrations == nil {
+		m.registrations = make(map[string]string)
+	}
+	m.registrations[email] = link
+	return nil
+}
+
+func (m *noticeMailer) registration(email string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.registrations[email]
 }
 
 func (m *noticeMailer) SendSignInLink(_ context.Context, email, link string) error {
@@ -103,6 +122,8 @@ type securityServer struct {
 	mailer    *noticeMailer
 	handler   http.Handler
 	lockPath  string
+	// signupPath switches invited self-registration on when it is set.
+	signupPath string
 }
 
 const threeGuardians = `{"guardians":[{"email":"anna@example.org","guardian_id":"guardian-a","tenant_id":"tenant-a","active":true},{"email":"ben@example.org","guardian_id":"guardian-a2","tenant_id":"tenant-a","active":true},{"email":"bea-parent@example.org","guardian_id":"guardian-b","tenant_id":"tenant-b","active":true}]}`
@@ -153,6 +174,13 @@ func (s *securityServer) start(withLocks bool) {
 			s.t.Fatal(err)
 		}
 		opt.guardianLocks = locks
+	}
+	if s.signupPath != "" {
+		invitations, err := signup.Open(s.signupPath, time.Now)
+		if err != nil {
+			s.t.Fatal(err)
+		}
+		opt.signup = invitations
 	}
 	handler, err := newHandler("https://app.example.org", s.families, s.guardians, s.mailer, s.sessions, opt)
 	if err != nil {
