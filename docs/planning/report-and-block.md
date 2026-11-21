@@ -47,7 +47,15 @@ A report is of little use if nobody looks. When the mailer can send notices (the
 - **Content:** the text names the reporting child and nobody else. No message text, no other child, no link. The subject, which shows on lock screens, names nobody. An unusual child name (control characters, over-long) is replaced by "Dein Kind".
 - **At most one e-mail per hour and child.** Further reports within the hour are visible in Yapuno but send nothing. Reporting the same message again is not a new report. If the mail server accepts none of the notices, the hour is not used up and the next report tries again.
 - **In the background:** the child's request returns at once; sending is limited to 15 seconds.
-- **The child is told** on the page, before reporting, that the guardians get an e-mail and that the message is not in it. Without a mailer that can send notices the page does not promise one. Blocking alone sends no e-mail.
+- **The child is told** on the page, before reporting, that the guardians get an e-mail, that they are reminded if they do not look, and that the message is not in the e-mail. Without a mailer that can send notices the page does not promise any of this. Blocking alone sends no e-mail.
+
+### Reminders while nobody has looked
+
+- A report counts as **seen** when a guardian with contact authority for the reporting child opens that child's contact page, where the report is shown. The store records the time, not who looked. The family overview with its count does not count as seeing; neither does listing or counting through the store.
+- While a report is unseen, the guardians are reminded **3 hours and 24 hours** after it was filed, then no more. Seeing or dismissing it ends the reminders. An expired report is never reminded.
+- A reminder is one e-mail per child, not per report, with the same rules as the first notice (names only the reporting child, no link). Its subject differs ("wartet noch"), and the text says that the report has not been looked at and that there are at most two reminders.
+- Reminders and first notices **share the hourly limit**: no guardian gets more than one e-mail per hour and child. A reminder that falls into that hour waits for the next pass; a report filed right after a reminder is not announced separately.
+- A timer checks every 5 minutes. A reminder is recorded only after a mail server accepted it, so a failed attempt is tried again at the next pass. Reminder state is stored with the report and survives restarts. A report that was unseen for a long time (for example while the server was down) gets one reminder, not one per missed time.
 
 ## Security and privacy properties (tested)
 
@@ -58,7 +66,8 @@ A report is of little use if nobody looks. When the mailer can send notices (the
 - Nothing on the reported child's pages changes after a report.
 - Pages for children and guardians contain no script for these functions, load nothing from other origins and use skin tokens only. Message text is rendered as text. Only fixed confirmation texts can be selected by a redirect.
 - Notices: recipients are exactly the guardians who may see the report (tested with an equal second guardian, a helper without contact authority, a guardian of a sibling only, a locked guardian and the other family); only a new report is announced; one notice per hour and child also under concurrent reports; a failed attempt does not use up the hour; a slow mail server does not delay the child; the mail is 7-bit clean, marked as automatic, without link or address, and cannot be bent by a crafted child name.
-- 71 mutations across the predicate, both stores, child pages, guardian pages and wiring: 69 are detected by the tests; 2 are equivalent because the property is checked twice (sequence number zero; a missing session on the safety page). 28 further mutations of the notice code are all detected.
+- 71 mutations across the predicate, both stores, child pages, guardian pages and wiring: 69 are detected by the tests; 2 are equivalent because the property is checked twice (sequence number zero; a missing session on the safety page). 28 further mutations of the notice code and 33 of the reminder code are all detected.
+- Reminders: due exactly at 3 and 24 hours and not a second earlier; never a third; per child and per report; not for seen, dismissed or expired reports; only a guardian with authority for that child can mark its reports as seen (not the other family, not a guardian of a sibling only); a view that shows no report writes nothing; a repeated view rewrites nothing; a failed write changes no state; the page still shows reports when the seen mark cannot be stored.
 
 ## Browser evidence (headless Chromium, not a physical device)
 
@@ -66,12 +75,18 @@ One scripted run through the real server over TLS with two children and both gua
 
 A second scripted run for the notice, 10 checks passed: the page tells the child about the e-mail and what it does not contain; no overflow, no clipped text and 44 px targets at 320, 375 and 430 px with the added sentence; no mail before a report; one notice to the reporting child's guardian naming only that child; the child's request took well under a second; a second report within the hour sent no second mail while both reports were visible to the guardian.
 
+A third scripted run for the reminder, 11 checks passed: the page tells the child about the reminder; no overflow, no clipped text and 44 px targets at 320, 375 and 430 px with the longer sentence; a fresh report is stored as unseen; the family overview and the other family's page leave it unseen; opening the contact page with the report records a time and no person; opening it again changes nothing. The timing itself is covered by tests with a controlled clock, not by the browser run.
+
 **Not verified:** physical iPhone/Android, screen readers, large text, landscape, a real mail server and real inboxes (delivery time, spam classification, rendering), and above all **whether children understand the page and would use it** — that needs testing with children and guardians.
 
 ## Limitations
 
-- **The notice is best effort.** Accepted by the mail server is not read; mail can be delayed, filtered or missed. The child is advised to speak to the guardians as well. There is no push notice and no reminder if a report stays open.
-- **The hourly limit is kept in memory.** After a restart the next report is announced even if one was announced shortly before. A second, more serious report within the hour sends no mail.
+- **Notice and reminders are best effort.** Accepted by the mail server is not read; mail can be delayed, filtered or missed. The child is advised to speak to the guardians as well. There is no push notice.
+- **"Seen" means the page was opened, not that anybody read or acted.** A guardian who opens the contact page for another reason ends the reminders. Seen by one guardian ends them for all.
+- **The child does not learn whether the guardians looked.**
+- **The hourly limit is kept in memory.** After a restart the next report or reminder goes out even if a mail was sent shortly before. A second, more serious report within the hour sends no mail of its own; it is covered by the reminder 3 hours after it was filed, if still unseen.
+- **Reminders ignore the time of day.** A report filed in the evening can cause a mail at night.
+- **The report file has new fields** (`seen_at`, `reminders`). An older binary refuses a file that contains them, so a rollback needs these fields removed or the file set aside.
 - **The e-mail leaves Yapuno.** The mail provider learns that this address belongs to a guardian of a child with that first name who reported something.
 - **No operator or moderator sees a report.** There is no escalation path for serious cases, no evidence hold beyond the guardians' own view and no process for the reported child's family.
 - **A blocked child can still guess** that they were blocked, and both children can still meet outside Yapuno.

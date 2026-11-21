@@ -270,3 +270,80 @@ func TestFamilyPageShowsOpenReportsPerChild(t *testing.T) {
 		t.Fatal("the reported child's family sees a hint")
 	}
 }
+
+// seeingReports records MarkSeen calls and can make them fail.
+type seeingReports struct {
+	ReportStore
+	seen []string
+	fail bool
+}
+
+func (s *seeingReports) MarkSeen(guardianID, tenantID, childID string) error {
+	s.seen = append(s.seen, guardianID+"/"+tenantID+"/"+childID)
+	if s.fail {
+		return errors.New("disk")
+	}
+	return s.ReportStore.MarkSeen(guardianID, tenantID, childID)
+}
+
+func TestOpeningTheContactPageMarksTheChildsReportsAsSeen(t *testing.T) {
+	rw := newReportWorld(t)
+	spy := &seeingReports{ReportStore: rw.reports}
+	as := func(s Session) http.Handler {
+		h, err := NewContactPagesWithReports(testAuth{session: s}, rw.store, rw.families, rw.looks, spy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	// No report yet: nothing to mark, nothing written.
+	contactGet(as(sessionA), "child-a")
+	if len(spy.seen) != 0 {
+		t.Fatalf("marked without a report: %v", spy.seen)
+	}
+	rw.report(t, 3, "bitte ansehen")
+	// Pages that do not show the report do not mark it: the other family's
+	// page, a refused page, and the family overview with its count.
+	contactGet(as(sessionB), "child-b")
+	if w := contactGet(as(sessionB), "child-a"); w.Code != http.StatusForbidden {
+		t.Fatalf("foreign page: %d", w.Code)
+	}
+	overview, err := NewWithOptions(testAuth{session: sessionA}, rw.families, Options{ContactPages: true, Reports: rw.reports})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	overview.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/family", nil))
+	if !strings.Contains(rec.Body.String(), "1 offene Meldung") {
+		t.Fatal("precondition: overview shows the count")
+	}
+	if len(spy.seen) != 0 {
+		t.Fatalf("marked by a page that does not show the report: %v", spy.seen)
+	}
+	// The guardian opens the page with the report: marked for exactly this child, with the session's identity.
+	w := contactGet(as(sessionA), "child-a")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "bitte ansehen") {
+		t.Fatalf("page: %d", w.Code)
+	}
+	if len(spy.seen) != 1 || spy.seen[0] != "guardian-a/tenant-a/child-a" {
+		t.Fatalf("seen calls: %v", spy.seen)
+	}
+	// The report is still there afterwards.
+	if rw.reports.Count("guardian-a", "tenant-a", "child-a") != 1 {
+		t.Fatal("viewing deleted the report")
+	}
+}
+
+func TestContactPageStillShowsReportsWhenSeenCannotBeRecorded(t *testing.T) {
+	rw := newReportWorld(t)
+	rw.report(t, 3, "trotzdem sichtbar")
+	spy := &seeingReports{ReportStore: rw.reports, fail: true}
+	h, err := NewContactPagesWithReports(testAuth{session: sessionA}, rw.store, rw.families, rw.looks, spy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := contactGet(h, "child-a")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "trotzdem sichtbar") || len(spy.seen) != 1 {
+		t.Fatalf("page with failing seen mark: %d %v", w.Code, spy.seen)
+	}
+}

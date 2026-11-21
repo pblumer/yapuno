@@ -50,12 +50,14 @@ Chosen options (if approved; product owner decisions of 2026-11-20): child block
 - A report is deleted when a guardian dismisses it, or after 30 days; a child can hold at most 20 open reports. Both numbers are placeholders.
 - A failed report never prevents a block the child asked for in the same step.
 - A new report is announced by e-mail to the guardians who may see it (product owner decisions of 2026-11-20): the mail names only the reporting child, carries no message text, no other child and no link; at most one mail per hour and child; blocking alone sends none. The child is told on the page. Locked guardians are not mailed. Sending never delays or fails the report.
+- A report is **seen** when a guardian with authority for the reporting child opens the page that shows it; the store records the time only. While unseen, the guardians are reminded 3 and 24 hours after the report, then no more (product owner decisions of 2026-11-21). Reminders follow the content rules of the first notice and share its limit of one mail per hour and child.
 
 ### Consequences
 - Positive: immediate self-protection; no pressure to unblock; guardians learn of a problem through the child's own choice; minimal disclosure; no new way to read chats; the blocked child is not confronted.
 - Negative / accepted trade-offs: the notice is best effort, discloses to the mail provider that a named child reported something, and a second report within the hour sends none, so guardians may still see a report late; serious cases have no escalation beyond the family; a single message can lack context; the blocked child's family is left with an unexplained pause; guardians can lift a block against the child's wish (the UI asks them to talk first, nothing enforces it); report copies are plaintext and outlive the messages they came from.
 - Open questions and review gates:
-  - **Notification:** push or in-app notice as a second channel, reminders for reports left open, and whether the hourly limit should let an urgent second report through.
+  - **Notification:** push or in-app notice as a second channel, quiet hours for reminders, and whether the hourly limit should let an urgent second report through.
+  - **Feedback to the child:** whether the child should see that a guardian has looked at a report.
   - **Escalation:** operator or moderator role, evidence hold, access logs, appeal for the reported family, and legal duties for serious content (#7).
   - **Retention** of reports and whether the reporting child may withdraw one.
   - **Context:** whether a child may add neighbouring messages or a reason, and how to prevent that from becoming transcript access.

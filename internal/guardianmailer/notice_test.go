@@ -154,3 +154,66 @@ func TestReportNoticeRejectsBadRecipients(t *testing.T) {
 		}
 	}
 }
+
+func TestReportReminderSaysNobodyLookedAndNamesOnlyTheOwnChild(t *testing.T) {
+	raw := reportReminder("yapuno@example.org", "anna@example.org", "Zoë")
+	for _, line := range strings.Split(raw, "\r\n") {
+		if len(line) > 78 {
+			t.Fatalf("line longer than 78 bytes: %q", line)
+		}
+		for _, b := range []byte(line) {
+			if b > 126 {
+				t.Fatalf("non-ASCII byte on the wire: %q", line)
+			}
+		}
+	}
+	msg, err := mail.ReadMessage(strings.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Header.Get("To") != "anna@example.org" || msg.Header.Get("Auto-Submitted") != "auto-generated" || len(msg.Header) != 7 {
+		t.Fatalf("headers: %v", msg.Header)
+	}
+	subject, err := new(mime.WordDecoder).DecodeHeader(msg.Header.Get("Subject"))
+	if err != nil || !strings.Contains(subject, "wartet noch") || strings.Contains(subject, "Zoë") {
+		t.Fatalf("subject: %q %v", subject, err)
+	}
+	if subject == "Yapuno: Eine Meldung wartet auf dich" {
+		t.Fatal("reminder must be distinguishable from the first notice")
+	}
+	decoded, err := io.ReadAll(quotedprintable.NewReader(msg.Body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(decoded)
+	for _, want := range []string{"Zoë hat in Yapuno eine Nachricht gemeldet", "noch nicht angesehen", "Kontakte von Zoë", "keinen Link", "höchstens zwei Erinnerungen"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body misses %q", want)
+		}
+	}
+	for _, absent := range []string{"http://", "https://", "www.", "@", "ß"} {
+		if strings.Contains(body, absent) {
+			t.Errorf("body contains %q", absent)
+		}
+	}
+	odd, _ := io.ReadAll(quotedprintable.NewReader(mustBody(t, reportReminder("yapuno@example.org", "anna@example.org", "Alex\r\nBcc: evil@example.org"))))
+	if !strings.Contains(string(odd), "Dein Kind hat in Yapuno eine Nachricht gemeldet") || strings.Contains(string(odd), "evil") {
+		t.Fatal("odd child name not replaced in the reminder")
+	}
+	s, err := New(Config{Host: "smtp.example.org", Port: 465, Username: "login", Password: "secret", From: "login@example.org"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SendReportReminder(context.Background(), "No Name <victim@example.org>", "Alex"); err == nil {
+		t.Fatal("accepted malformed recipient")
+	}
+}
+
+func mustBody(t *testing.T, raw string) io.Reader {
+	t.Helper()
+	msg, err := mail.ReadMessage(strings.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return msg.Body
+}

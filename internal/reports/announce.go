@@ -31,6 +31,8 @@ type Addresses interface {
 // must not be given anything but the address and the child's display name.
 type Mailer interface {
 	SendReportNotice(ctx context.Context, email, childName string) error
+	// SendReportReminder says that a report has not been looked at yet.
+	SendReportReminder(ctx context.Context, email, childName string) error
 }
 
 // Announcer e-mails the guardians of a reporting child that a report is
@@ -98,15 +100,36 @@ func (a *Announcer) Announce(child contacts.Party) {
 		defer a.wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), a.timeout)
 		defer cancel()
-		if a.send(ctx, child) == 0 {
+		if a.send(ctx, child, a.mailer.SendReportNotice) == 0 {
 			a.release(child, taken)
 		}
 	}()
 }
 
+// remind sends a reminder now, unless a mail about this child went out within
+// the interval: reminders and first notices share one limit, so a guardian
+// never gets more than one mail per hour and child. It reports whether at
+// least one guardian's mail server accepted the reminder.
+func (a *Announcer) remind(ctx context.Context, child contacts.Party) bool {
+	if !validParty(child) || ctx.Err() != nil {
+		return false
+	}
+	taken, ok := a.reserve(child)
+	if !ok {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, a.timeout)
+	defer cancel()
+	if a.send(ctx, child, a.mailer.SendReportReminder) == 0 {
+		a.release(child, taken)
+		return false
+	}
+	return true
+}
+
 // send mails every guardian who may currently see this child's reports and
-// returns how many notices the mail server accepted.
-func (a *Announcer) send(ctx context.Context, child contacts.Party) int {
+// returns how many mails the mail server accepted.
+func (a *Announcer) send(ctx context.Context, child contacts.Party, mail func(ctx context.Context, email, childName string) error) int {
 	name, _ := a.guardians.ChildName(child.TenantID, child.ChildID)
 	var (
 		wg       sync.WaitGroup
@@ -124,7 +147,7 @@ func (a *Announcer) send(ctx context.Context, child contacts.Party) int {
 		wg.Add(1)
 		go func(address string) {
 			defer wg.Done()
-			if a.mailer.SendReportNotice(ctx, address, name) == nil {
+			if mail(ctx, address, name) == nil {
 				mu.Lock()
 				accepted++
 				mu.Unlock()
@@ -172,4 +195,41 @@ func (n *Notifying) File(p messages.Principal, conversationID string, seq uint64
 		n.announcer.Announce(p.Party)
 	}
 	return created, err
+}
+
+// Reminder reminds guardians of reports that none of them has looked at.
+// Run is meant to be called by a timer every few minutes.
+type Reminder struct {
+	store     *Store
+	announcer *Announcer
+	mu        sync.Mutex
+}
+
+func NewReminder(store *Store, announcer *Announcer) (*Reminder, error) {
+	if store == nil || announcer == nil {
+		return nil, errors.New("report store and announcer are required")
+	}
+	return &Reminder{store: store, announcer: announcer}, nil
+}
+
+// Run makes one pass and returns the number of children whose guardians were
+// reminded. A reminder is recorded only after a mail server accepted it, so a
+// failed attempt is tried again at the next run. Runs never overlap.
+func (r *Reminder) Run(ctx context.Context) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	reminded := 0
+	for _, child := range r.store.RemindersDue() {
+		if ctx.Err() != nil {
+			break
+		}
+		if !r.announcer.remind(ctx, child) {
+			continue
+		}
+		reminded++
+		// If this cannot be stored, the shared hourly limit still prevents a
+		// mail at every run.
+		_ = r.store.MarkReminded(child)
+	}
+	return reminded
 }
