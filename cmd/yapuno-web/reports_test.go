@@ -193,12 +193,31 @@ func TestReportAndBlockEndToEnd(t *testing.T) {
 	if !strings.Contains(page("/family", ga), "2 offene Meldungen") {
 		t.Fatal("family overview does not point to the reports")
 	}
+	// The overview is not the report: Alex is not told that anybody looked.
+	const seen = "Deine Eltern haben die Meldung gesehen"
+	if p := page(safetyPath, alex); strings.Contains(p, seen) || strings.Count(p, "Schon gemeldet") != 2 {
+		t.Fatal("child is told the guardians looked before they opened the reports")
+	}
 	contactsA := page("/family/contacts?child_id=child-a", ga)
 	if !strings.Contains(contactsA, "Das war gemein") || !strings.Contains(contactsA, "Zweite gemeine Nachricht") || !strings.Contains(contactsA, "Nachricht von Bea") {
 		t.Fatal("guardian does not see the reported messages")
 	}
 	if strings.Contains(contactsA, "Privat von Alex") || strings.Contains(contactsA, "Auch privat") {
 		t.Fatal("guardian sees messages that were not reported")
+	}
+	// Now Alex, and only Alex, on the safety page only, sees that the guardians looked.
+	if p := page(safetyPath, alex); strings.Count(p, seen) != 2 || strings.Contains(p, "Schon gemeldet") {
+		t.Fatal("child is not told that the guardians have seen the reports")
+	}
+	for _, path := range []string{"/child", "/child/chat/" + chat} {
+		if strings.Contains(page(path, alex), "gesehen") {
+			t.Fatalf("%s shows the feedback outside the safety page", path)
+		}
+	}
+	for _, path := range []string{"/child", "/child/chat/" + chat, safetyPath} {
+		if strings.Contains(page(path, bea), seen) {
+			t.Fatalf("%s tells the reported child", path)
+		}
 	}
 	if p := page("/family/contacts?child_id=child-b", gb); strings.Contains(p, "gemein") || strings.Contains(p, "Meldung") || strings.Contains(page("/family", gb), "Meldung") {
 		t.Fatal("the reported child's family learns of the report")
@@ -260,6 +279,13 @@ func TestReportAndBlockEndToEnd(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "Privat von Alex") || strings.Contains(string(raw), "Auch privat") {
 		t.Fatal("report file holds messages that were never reported")
+	}
+	// The guardian's list has one report left, but Alex still sees both as seen and can report neither again.
+	if got := len(reportField.FindAllString(page("/family/contacts?child_id=child-a", ga), -1)); got != 1 {
+		t.Fatalf("reports left for the guardian: %d", got)
+	}
+	if p := page(safetyPath, alex); strings.Count(p, seen) != 2 || len(seqChoice.FindAllString(p, -1)) != 1 {
+		t.Fatal("feedback or choice list wrong after the guardian closed a report")
 	}
 	// The other family ends the contact: the chat is purged, the remaining report stays with Alex's guardian.
 	remove := url.Values{"csrf_token": {csrfOn("/family/contacts?child_id=child-b", gb)}, "child_id": {"child-b"}, "link_id": {chat}, "confirm": {"yes"}}

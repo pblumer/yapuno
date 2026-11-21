@@ -74,7 +74,15 @@ type record struct {
 	SeenAt *time.Time `json:"seen_at,omitempty"`
 	// Reminders counts the reminder stages already sent for this report.
 	Reminders int `json:"reminders,omitempty"`
+	// DismissedAt is when a guardian dismissed the report. From then on the
+	// record is only a marker for the reporting child: it holds no message
+	// text and no name, is hidden from guardians and lasts until retention
+	// ends.
+	DismissedAt *time.Time `json:"dismissed_at,omitempty"`
 }
+
+// open reports are shown to guardians; dismissed ones are markers.
+func (r record) open() bool { return r.DismissedAt == nil }
 
 // ReminderAfter lists how long after a report its guardians are reminded
 // while no guardian has seen it. There is one reminder per entry.
@@ -151,7 +159,8 @@ func Open(path string, msgs Messages, families Families, now func() time.Time) (
 		key := r.Reporter.TenantID + "\x00" + r.Reporter.ChildID + "\x00" + r.Conversation + "\x00" + fmt.Sprint(r.Seq)
 		if len(r.ID) != 32 || !validParty(r.Reporter) || !validParty(r.Sender) || r.Reporter == r.Sender ||
 			r.Conversation == "" || r.Seq == 0 || r.ReportedAt.IsZero() || seen["id:"+r.ID] || seen[key] ||
-			r.Reminders < 0 || r.Reminders > len(ReminderAfter) {
+			r.Reminders < 0 || r.Reminders > len(ReminderAfter) ||
+			(!r.open() && (r.Body != "" || r.SenderName != "" || r.SeenAt == nil)) {
 			return nil, fmt.Errorf("%w: report record", ErrInvalid)
 		}
 		seen["id:"+r.ID], seen[key] = true, true
@@ -258,10 +267,14 @@ func (s *Store) File(p messages.Principal, conversationID string, seq uint64) (b
 			continue
 		}
 		if r.Reporter == p.Party {
+			// An open report or the marker of a dismissed one: either way
+			// this message has been reported.
 			if r.Conversation == conversationID && r.Seq == seq {
 				return false, nil
 			}
-			open++
+			if r.open() {
+				open++
+			}
 		}
 		next = append(next, r)
 	}
@@ -297,7 +310,7 @@ func (s *Store) ForChild(guardian, tenant, child string) ([]Report, error) {
 	}
 	var mine []record
 	for _, r := range s.records {
-		if r.Reporter == party && s.live(r) {
+		if r.Reporter == party && s.live(r) && r.open() {
 			mine = append(mine, r)
 		}
 	}
@@ -327,7 +340,10 @@ func (s *Store) Count(guardian, tenant, child string) int {
 	return len(list)
 }
 
-// Dismiss deletes one report of this child, including the message copy.
+// Dismiss ends one report of this child: the copy of the message and the
+// sender's name are deleted and guardians no longer see it. A marker without
+// content stays until retention ends, so the reporting child keeps seeing
+// that the report was seen and cannot report the same message again.
 func (s *Store) Dismiss(guardian, tenant, child, id string) error {
 	party := contacts.Party{TenantID: tenant, ChildID: child}
 	s.mu.Lock()
@@ -341,9 +357,14 @@ func (s *Store) Dismiss(guardian, tenant, child, id string) error {
 		if !s.live(r) {
 			continue
 		}
-		if r.ID == id && r.Reporter == party {
+		if r.ID == id && r.Reporter == party && r.open() {
 			found = true
-			continue
+			now := s.now().UTC()
+			r.Body, r.SenderName, r.DismissedAt = "", "", &now
+			if r.SeenAt == nil {
+				// Dismissing is seeing.
+				r.SeenAt = &now
+			}
 		}
 		next = append(next, r)
 	}
@@ -356,8 +377,27 @@ func (s *Store) Dismiss(guardian, tenant, child, id string) error {
 	return nil
 }
 
+// Seen returns the sequence numbers of this child's reports in one
+// conversation that a guardian has seen (or dismissed). The caller must have
+// authenticated exactly this child; nobody else learns this.
+func (s *Store) Seen(p contacts.Party, conversationID string) map[uint64]bool {
+	out := map[uint64]bool{}
+	if !validParty(p) || conversationID == "" {
+		return out
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, r := range s.records {
+		if r.Reporter == p && r.Conversation == conversationID && s.live(r) && r.SeenAt != nil {
+			out[r.Seq] = true
+		}
+	}
+	return out
+}
+
 // Reported returns the sequence numbers this child has already reported in
-// one conversation. The caller must have authenticated exactly this child.
+// one conversation, including dismissed ones while their marker lasts. The
+// caller must have authenticated exactly this child.
 func (s *Store) Reported(p contacts.Party, conversationID string) map[uint64]bool {
 	out := map[uint64]bool{}
 	if !validParty(p) || conversationID == "" {
@@ -387,7 +427,7 @@ func (s *Store) MarkSeen(guardian, tenant, child string) error {
 	next := append([]record(nil), s.records...)
 	changed := false
 	for i, r := range next {
-		if r.Reporter == party && r.SeenAt == nil && s.live(r) {
+		if r.Reporter == party && r.SeenAt == nil && s.live(r) && r.open() {
 			seen := now
 			next[i].SeenAt = &seen
 			changed = true
@@ -404,7 +444,7 @@ func (s *Store) MarkSeen(guardian, tenant, child string) error {
 
 // due reports whether a reminder stage is reached that was not sent yet.
 func (s *Store) due(r record, now time.Time) bool {
-	return r.SeenAt == nil && s.live(r) && r.stage(now) > r.Reminders
+	return r.open() && r.SeenAt == nil && s.live(r) && r.stage(now) > r.Reminders
 }
 
 // RemindersDue lists the children with at least one report that no guardian

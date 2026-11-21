@@ -281,12 +281,9 @@ func TestGuardianDismissesOnlyReportsOfTheirOwnChild(t *testing.T) {
 	if w.reports.Count("anna", lea.TenantID, lea.ChildID) != 0 {
 		t.Fatal("report still listed after dismissal")
 	}
-	// The copy of the message is gone from disk, and the child may report it again.
-	if raw, _ := os.ReadFile(w.path); strings.Contains(string(raw), "weg damit") {
-		t.Fatal("dismissed report still on disk")
-	}
-	if created, err := w.reports.File(w.leaP, w.chat, seq); err != nil || !created {
-		t.Fatalf("report after dismissal: %v %v", created, err)
+	// The copy of the message and the sender's name are gone from disk.
+	if raw, _ := os.ReadFile(w.path); strings.Contains(string(raw), "weg damit") || strings.Contains(string(raw), "Mia") {
+		t.Fatalf("dismissed report still holds text or name: %s", raw)
 	}
 }
 

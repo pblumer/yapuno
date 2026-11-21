@@ -180,7 +180,7 @@ var notices = map[string]string{
 	"confirmed":   "Kontakt freigegeben.",
 	"removed":     "Entfernt.",
 	"unblocked":   "Blockierung aufgehoben.",
-	"report-done": "Meldung gelöscht.",
+	"report-done": "Meldung geschlossen. Die Kopie der Nachricht ist gelöscht.",
 }
 
 const contactCSS = `body{margin:0}
@@ -237,12 +237,12 @@ var contactPage = template.Must(template.New("contacts").Parse(contactHead + `
 <p class="yp-muted">{{.Name}} kann nur mit Kindern schreiben, denen beide Familien zugestimmt haben. Es gibt kein Verzeichnis und keine Suche.</p>
 {{if .Alert}}<p class="yp-alert" role="alert">{{.Alert}}</p>{{end}}{{if .Notice}}<p class="yp-status" role="status">{{.Notice}}</p>{{end}}
 {{if .Reports}}<section aria-labelledby="yp-reports"><h2 id="yp-reports">Meldungen von {{.Name}}</h2>
-<p class="yp-muted">{{.Name}} hat diese Nachrichten gemeldet. Du siehst nur die gemeldete Nachricht, nicht den übrigen Chat. Die andere Familie wurde nicht informiert.</p>
+<p class="yp-muted">{{.Name}} hat diese Nachrichten gemeldet. Du siehst nur die gemeldete Nachricht, nicht den übrigen Chat. Die andere Familie wurde nicht informiert. {{.Name}} sieht in Yapuno, dass ihr die Meldung gesehen habt.</p>
 <ul>{{range .Reports}}<li class="yp-item"><strong>Nachricht von {{if .From}}{{.From}}{{else}}einem Kind{{end}}</strong>
 <blockquote class="yp-reported">{{.Body}}</blockquote>
 <p class="yp-muted">Geschrieben am {{.Sent}} · Gemeldet am {{.Filed}}</p>
-<form method="post" action="/family/contacts/report-done"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="child_id" value="{{$.Child}}"><input type="hidden" name="report_id" value="{{.ID}}"><label class="yp-check"><input type="checkbox" name="confirm" value="yes" required> <span>Wir haben darüber gesprochen. Meldung und Kopie der Nachricht löschen.</span></label><button class="yp-secondary" type="submit">Erledigt</button></form></li>{{end}}</ul>
-<p class="yp-muted">Eine Meldung wird nach {{.RetentionDays}} Tagen automatisch gelöscht. Einen Kontakt kannst du weiter unten entfernen.</p></section>{{end}}
+<form method="post" action="/family/contacts/report-done"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="child_id" value="{{$.Child}}"><input type="hidden" name="report_id" value="{{.ID}}"><label class="yp-check"><input type="checkbox" name="confirm" value="yes" required> <span>Wir haben darüber gesprochen. Meldung schliessen und Kopie der Nachricht löschen.</span></label><button class="yp-secondary" type="submit">Erledigt</button></form></li>{{end}}</ul>
+<p class="yp-muted">Eine Meldung wird nach {{.RetentionDays}} Tagen automatisch gelöscht. Nach «Erledigt» bleibt bis dahin nur ein Vermerk ohne Nachrichtentext, damit {{.Name}} weiter sieht, dass ihr sie gesehen habt. Einen Kontakt kannst du weiter unten entfernen.</p></section>{{end}}
 {{if .View.Blocked}}<section aria-labelledby="yp-blocked"><h2 id="yp-blocked">Von {{.Name}} blockiert</h2><ul>{{range .View.Blocked}}<li class="yp-item"><strong>{{.Name}}</strong>
 <p class="yp-muted">{{$.Name}} hat diesen Kontakt blockiert. Die beiden können sich nicht schreiben. Sprich mit {{$.Name}}, bevor du die Blockierung aufhebst.</p>
 <form method="post" action="/family/contacts/unblock"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="child_id" value="{{$.Child}}"><input type="hidden" name="link_id" value="{{.ID}}"><label class="yp-check"><input type="checkbox" name="confirm" value="yes" required> <span>{{$.Name}} ist einverstanden. Die beiden dürfen sich wieder schreiben.</span></label><button class="yp-secondary" type="submit">Blockierung aufheben</button></form>
