@@ -124,6 +124,32 @@ func (s *Sender) SendAccessLockNotice(ctx context.Context, email string) error {
 	return s.deliver(ctx, email, accessLockNotice(s.cfg.From, email))
 }
 
+// invitationContactText tells a guardian that an invitation of their family
+// was used and connected their own child with a child of the family that
+// registered. It names only the guardian's own child, never the other family
+// or its child, and carries no link.
+const invitationContactText = `Hallo
+
+Mit einer Einladung eurer Familie hat sich eine andere Familie bei Yapuno registriert und zugestimmt, dass die Kinder einander schreiben. %[1]s hat dadurch einen neuen Kontakt.
+
+So siehst du, wer es ist:
+- Melde dich wie gewohnt bei Yapuno an. Diese Nachricht enthält absichtlich keinen Link.
+- Öffne unter «Familie» die Kontakte von %[2]s. Dort steht der neue Kontakt mit Vornamen.
+
+Kennst du diese Familie nicht, oder war die Einladung für jemand anderen bestimmt, beende den Kontakt dort. Die Kinder können sich dann nicht mehr schreiben.
+`
+
+func invitationContactNotice(from, to, childName string) string {
+	subject, object := childWords(childName)
+	return notice(from, to, "Yapuno: Neuer Kontakt durch eine Einladung", fmt.Sprintf(invitationContactText, subject, object))
+}
+
+// SendInvitationContactNotice tells one verified guardian address that their
+// own child has a new contact through an invitation of their family.
+func (s *Sender) SendInvitationContactNotice(ctx context.Context, email, childName string) error {
+	return s.deliver(ctx, email, invitationContactNotice(s.cfg.From, email, childName))
+}
+
 // registrationText asks an invited person to confirm their address. Unlike
 // the security notices it must carry a link: following it is the proof of
 // control over the mailbox. It names nobody.

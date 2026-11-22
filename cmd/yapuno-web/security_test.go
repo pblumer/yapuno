@@ -35,6 +35,9 @@ type noticeMailer struct {
 	// reportNotices holds "address about child name" for every report notice.
 	reportNotices   []string
 	reportReminders []string
+	// contactNotices holds "address about child name" for every notice
+	// about a contact made through an invitation.
+	contactNotices []string
 	// registrations holds the confirmation link per invited address.
 	registrations map[string]string
 }
@@ -77,6 +80,29 @@ func (m *noticeMailer) SendReportNotice(_ context.Context, email, childName stri
 	defer m.mu.Unlock()
 	m.reportNotices = append(m.reportNotices, email+" about "+childName)
 	return nil
+}
+
+func (m *noticeMailer) SendInvitationContactNotice(_ context.Context, email, childName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.contactNotices = append(m.contactNotices, email+" about "+childName)
+	return nil
+}
+
+// contacts waits briefly for background mail and returns the notices about
+// contacts made through an invitation, sorted.
+func (m *noticeMailer) contacts(want int) []string {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		m.mu.Lock()
+		got := append([]string(nil), m.contactNotices...)
+		m.mu.Unlock()
+		if len(got) >= want || time.Now().After(deadline) {
+			sort.Strings(got)
+			return got
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func (m *noticeMailer) SendReportReminder(_ context.Context, email, childName string) error {
