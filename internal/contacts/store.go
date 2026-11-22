@@ -7,7 +7,13 @@
 // (approval of A's side). Only then is the contact active. Either family can
 // end a pending request or an active contact at any time.
 //
-// There is no directory or search: a relationship can only start from a code.
+// A second way exists for a family that registers through an invitation: the
+// inviting guardian names a child in it, the registering guardian agrees, and
+// Connect creates the contact at once. See
+// docs/adr/draft-invitation-connects-children.md.
+//
+// There is no directory or search: a relationship can only start from a code
+// or from such an invitation.
 // Callers MUST pass guardian and tenant identity from a verified server-side
 // session; every operation re-checks the guardian's current grant.
 // See docs/adr/draft-contact-invitations.md.
@@ -342,6 +348,42 @@ func (s *Store) Redeem(guardian, tenant, child, code string) (string, error) {
 		return "", ErrLimit
 	}
 	next.Links = append(next.Links, link{ID: id, Inviter: inv.Inviter, Invitee: invitee, Expires: s.now().Add(RequestTTL)})
+	if err := s.commit(next); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// Connect creates an active contact at once. It is for the case in which both
+// guardians have each approved this contact for their own child and the
+// caller holds both approvals: inviterGuardian named the inviting child when
+// creating an invitation, inviteeGuardian agreed for the invited child. Both
+// must hold contact authority now. A request or contact that already exists
+// for the two children is left as it is.
+func (s *Store) Connect(inviterGuardian string, inviter Party, inviteeGuardian string, invitee Party) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.allowed(inviterGuardian, inviter) || !s.allowed(inviteeGuardian, invitee) {
+		return "", ErrForbidden
+	}
+	if inviter == invitee {
+		return "", ErrInvalid
+	}
+	next := s.pruned()
+	for _, l := range next.Links {
+		if l.joins(inviter, invitee) {
+			return "", ErrExists
+		}
+	}
+	if len(next.Invitations)+len(next.Links) >= maxRecords {
+		return "", ErrLimit
+	}
+	rawID := make([]byte, 16)
+	if _, err := rand.Read(rawID); err != nil {
+		return "", err
+	}
+	id := hex.EncodeToString(rawID)
+	next.Links = append(next.Links, link{ID: id, Inviter: inviter, Invitee: invitee, Active: true})
 	if err := s.commit(next); err != nil {
 		return "", err
 	}

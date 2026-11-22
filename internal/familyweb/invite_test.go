@@ -33,7 +33,7 @@ func newInviteWorld(t *testing.T) *inviteWorld {
 
 func (iw *inviteWorld) pages(t *testing.T, auth testAuth) http.Handler {
 	t.Helper()
-	h, err := NewInvitePages(auth, iw.invitations, iw.families, "https://yapuno.example", iw.looks)
+	h, err := NewInvitePages(auth, iw.invitations, iw.families, "https://yapuno.example", InviteOptions{Looks: iw.looks})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestInvitationsAreLimitedWithAnExplanation(t *testing.T) {
 func TestWithdrawingRemovesOnlyOnesOwnInvitation(t *testing.T) {
 	iw := newInviteWorld(t)
 	a, b := iw.pages(t, testAuth{session: sessionA}), iw.pages(t, testAuth{session: sessionB})
-	code, inv, err := iw.invitations.Invite(sessionA.GuardianID, sessionA.TenantID)
+	code, inv, err := iw.invitations.Invite(sessionA.GuardianID, sessionA.TenantID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestWithdrawingRemovesOnlyOnesOwnInvitation(t *testing.T) {
 func TestInviteActionsRejectInvalidSubmissions(t *testing.T) {
 	iw := newInviteWorld(t)
 	h := iw.pages(t, testAuth{session: sessionA})
-	_, inv, _ := iw.invitations.Invite(sessionA.GuardianID, sessionA.TenantID)
+	_, inv, _ := iw.invitations.Invite(sessionA.GuardianID, sessionA.TenantID, "")
 	cases := []struct {
 		name, path, contentType string
 		form                    url.Values
@@ -228,7 +228,7 @@ func TestOnlyGuardiansWithFullAuthorityInvite(t *testing.T) {
 		"devices only":  {ManageDevices: true},
 		"contacts only": {ApproveContacts: true},
 	} {
-		h, err := NewInvitePages(testAuth{session: stranger}, iw.invitations, limitedFamilies{perms}, "https://yapuno.example", nil)
+		h, err := NewInvitePages(testAuth{session: stranger}, iw.invitations, limitedFamilies{perms}, "https://yapuno.example", InviteOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -245,7 +245,7 @@ func TestOnlyGuardiansWithFullAuthorityInvite(t *testing.T) {
 	if len(iw.invitations.Pending(stranger.GuardianID, stranger.TenantID)) != 0 {
 		t.Fatal("invitation created without authority")
 	}
-	full, err := NewInvitePages(testAuth{session: stranger}, iw.invitations, limitedFamilies{familydashboard.Permissions{ManageDevices: true, ApproveContacts: true}}, "https://yapuno.example", nil)
+	full, err := NewInvitePages(testAuth{session: stranger}, iw.invitations, limitedFamilies{familydashboard.Permissions{ManageDevices: true, ApproveContacts: true}}, "https://yapuno.example", InviteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,21 +267,21 @@ func TestInvitePagesFollowTheGuardiansSkinAndNeedTheirDependencies(t *testing.T)
 		t.Error("saved skin not applied")
 	}
 	auth := testAuth{session: sessionA}
-	if _, err := NewInvitePages(nil, iw.invitations, iw.families, "https://yapuno.example", nil); err == nil {
+	if _, err := NewInvitePages(nil, iw.invitations, iw.families, "https://yapuno.example", InviteOptions{}); err == nil {
 		t.Error("nil authenticator accepted")
 	}
-	if _, err := NewInvitePages(auth, nil, iw.families, "https://yapuno.example", nil); err == nil {
+	if _, err := NewInvitePages(auth, nil, iw.families, "https://yapuno.example", InviteOptions{}); err == nil {
 		t.Error("nil invitations accepted")
 	}
-	if _, err := NewInvitePages(auth, iw.invitations, nil, "https://yapuno.example", nil); err == nil {
+	if _, err := NewInvitePages(auth, iw.invitations, nil, "https://yapuno.example", InviteOptions{}); err == nil {
 		t.Error("nil families accepted")
 	}
 	for _, origin := range []string{"", "http://yapuno.example", "https://yapuno.example/path", "https://user@yapuno.example"} {
-		if _, err := NewInvitePages(auth, iw.invitations, iw.families, origin, nil); err == nil {
+		if _, err := NewInvitePages(auth, iw.invitations, iw.families, origin, InviteOptions{}); err == nil {
 			t.Errorf("origin %q accepted", origin)
 		}
 	}
-	if _, err := NewInvitePages(auth, iw.invitations, iw.families, "https://yapuno.example", nil); err != nil {
+	if _, err := NewInvitePages(auth, iw.invitations, iw.families, "https://yapuno.example", InviteOptions{}); err != nil {
 		t.Errorf("without looks: %v", err)
 	}
 }

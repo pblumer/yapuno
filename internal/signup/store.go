@@ -2,6 +2,11 @@
 // creates a one-time invitation, and whoever opens it registers their own
 // family with an e-mail address they control.
 //
+// An invitation may name one child of the inviting family. That is the
+// inviting guardian's approval for a contact with the new family's child,
+// which the new guardian accepts or declines in the last step. See
+// docs/adr/draft-invitation-connects-children.md.
+//
 // An invitation and a confirmed mailbox are not evidence of guardianship.
 // Guardianship stays self-declared here, so this feature is switched off by
 // default and is not sufficient for real children.
@@ -48,10 +53,13 @@ const (
 // Invitation is one invitation. It holds identifiers only: no address and no
 // name. A used invitation stays as a record of which family invited which.
 type Invitation struct {
-	ID        string     `json:"id"`
-	Digest    string     `json:"digest"`
-	Guardian  string     `json:"guardian"`
-	Tenant    string     `json:"tenant"`
+	ID       string `json:"id"`
+	Digest   string `json:"digest"`
+	Guardian string `json:"guardian"`
+	Tenant   string `json:"tenant"`
+	// Child, if set, is the inviting family's child for whom the inviting
+	// guardian approves a contact with the invited family's first child.
+	Child     string     `json:"child,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	ExpiresAt time.Time  `json:"expires_at"`
 	Mails     int        `json:"mails,omitempty"`
@@ -134,7 +142,7 @@ func read(path string) ([]Invitation, error) {
 	for _, inv := range doc.Invitations {
 		if !validID(inv.ID) || !digestPattern.MatchString(inv.Digest) || !validID(inv.Guardian) || !validID(inv.Tenant) ||
 			inv.CreatedAt.IsZero() || inv.ExpiresAt.IsZero() || inv.Mails < 0 || ids[inv.ID] || digests[inv.Digest] ||
-			(inv.UsedAt == nil) != (inv.Joined == "") || (inv.Joined != "" && !validID(inv.Joined)) {
+			(inv.UsedAt == nil) != (inv.Joined == "") || (inv.Joined != "" && !validID(inv.Joined)) || (inv.Child != "" && !validID(inv.Child)) {
 			return nil, ErrUnavailable
 		}
 		ids[inv.ID], digests[inv.Digest] = true, true
@@ -234,9 +242,11 @@ func digest(code string) string {
 }
 
 // Invite creates an invitation for a guardian the caller has authenticated.
-// The returned code is shown once; only its digest is stored.
-func (s *Store) Invite(guardian, tenant string) (string, Invitation, error) {
-	if !validID(guardian) || !validID(tenant) {
+// The returned code is shown once; only its digest is stored. child may be
+// empty; if it is not, the caller has checked that the guardian may approve
+// contacts for that child, and whoever connects with it later checks again.
+func (s *Store) Invite(guardian, tenant, child string) (string, Invitation, error) {
+	if !validID(guardian) || !validID(tenant) || (child != "" && !validID(child)) {
 		return "", Invitation{}, ErrInvalid
 	}
 	s.mu.Lock()
@@ -262,7 +272,7 @@ func (s *Store) Invite(guardian, tenant string) (string, Invitation, error) {
 		return "", Invitation{}, ErrUnavailable
 	}
 	now := s.now()
-	inv := Invitation{ID: id, Digest: digest(code), Guardian: guardian, Tenant: tenant, CreatedAt: now, ExpiresAt: now.Add(InvitationTTL)}
+	inv := Invitation{ID: id, Digest: digest(code), Guardian: guardian, Tenant: tenant, Child: child, CreatedAt: now, ExpiresAt: now.Add(InvitationTTL)}
 	if err := s.commit(append(s.copyItems(), inv)); err != nil {
 		return "", Invitation{}, err
 	}

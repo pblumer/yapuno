@@ -30,6 +30,8 @@ var homePage = template.Must(template.New("home").Parse(`<!doctype html><html la
 <header class="yp-home-top"><div class="yp-logo">ya<span>puno</span></div>{{if .Figure}}<a class="yp-me" href="/family/look" aria-label="Mein Look">{{.Figure}}</a>{{end}}</header>
 <h1>Deine Familie</h1>
 <p class="yp-muted">Hier richtest du ein, womit und mit wem deine Kinder schreiben.</p>
+{{if .Alert}}<p class="yp-alert" role="alert">{{.Alert}}</p>{{end}}
+{{if .Notice}}<p class="yp-status" role="status">{{.Notice}}</p>{{end}}
 {{range .Children}}<section aria-labelledby="yp-child-{{.N}}"><h2 id="yp-child-{{.N}}">{{.Name}}</h2>
 {{if or .Devices .Contacts .Chat}}<ul class="yp-rows">
 {{if .Devices}}<li><a href="/family/devices?child_id={{.ID}}"><span>Geräte von {{.Name}}<small>Handy oder Tablet verbinden und verwalten</small></span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
@@ -48,13 +50,25 @@ var homePage = template.Must(template.New("home").Parse(`<!doctype html><html la
 </ul></section>
 <section aria-labelledby="yp-guide"><h2 id="yp-guide">So kommt ihr zum ersten Chat</h2><ol class="yp-steps">
 <li><strong>Gerät verbinden.</strong> {{if .DevicesEnabled}}Öffne auf dem Handy oder Tablet deines Kindes die Adresse, die unter «Geräte» steht. Das Gerät zeigt einen Code mit sechs Ziffern; tippe ihn unter «Geräte» ein.{{else}}Das Verbinden von Geräten ist auf dieser Installation nicht eingeschaltet.{{end}}</li>
-<li><strong>Zweite Familie.</strong> {{if .CanInvite}}Öffne «Eine Familie einladen» und gib den Link einer erwachsenen Person, die du kennst. Sie registriert sich damit selbst und verbindet ebenfalls ein Gerät.{{else}}Weitere Familien legt der Betreiber dieser Installation an.{{end}}</li>
-<li><strong>Kinder verbinden.</strong> {{if .ContactsEnabled}}Öffne «Kontakte», erstelle einen Code und gib ihn der anderen Familie. Sie löst ihn ein, danach gibst du die Anfrage frei.{{else}}Kontakte zwischen Familien sind auf dieser Installation nicht eingeschaltet.{{end}}</li>
+<li><strong>Zweite Familie.</strong> {{if .InviteConnects}}Öffne «Eine Familie einladen», wähle das Kind, das verbunden werden soll, und gib den Link einer erwachsenen Person, die du kennst. Sie registriert sich damit selbst, stimmt der Verbindung zu und verbindet ebenfalls ein Gerät.{{else if .CanInvite}}Öffne «Eine Familie einladen» und gib den Link einer erwachsenen Person, die du kennst. Sie registriert sich damit selbst und verbindet ebenfalls ein Gerät.{{else}}Weitere Familien legt der Betreiber dieser Installation an.{{end}}</li>
+<li><strong>Kinder verbinden.</strong> {{if .InviteConnects}}Mit der Einladung sind die Kinder schon verbunden. Ist die andere Familie bereits registriert, öffne «Kontakte», erstelle einen Code und gib ihn ihr. Sie löst ihn ein, danach gibst du die Anfrage frei.{{else if .ContactsEnabled}}Öffne «Kontakte», erstelle einen Code und gib ihn der anderen Familie. Sie löst ihn ein, danach gibst du die Anfrage frei.{{else}}Kontakte zwischen Familien sind auf dieser Installation nicht eingeschaltet.{{end}}</li>
 <li><strong>Schreiben.</strong> Die Kinder schreiben auf ihren Geräten miteinander. {{if .ChatEnabled}}Du schreibst unter «Chats» mit deinem Kind und, sobald die Kinder verbunden sind, mit den anderen Eltern.{{else}}Der Chat für Eltern ist auf dieser Installation nicht eingeschaltet.{{end}}</li>
 </ol></section>
 {{if .Inactive}}<p class="yp-muted">Auf dieser Installation nicht eingeschaltet: {{.Inactive}}. Der Betreiber schaltet Funktionen in der Konfiguration ein.</p>{{end}}
 <p class="yp-muted">Vorschau mit synthetischen Profilen.{{if .Version}} Version {{.Version}}{{end}}</p>
 </div></main></body></html>`))
+
+// homeNotices and homeAlerts are the only texts a redirect can select. They
+// tell a guardian who has just registered what became of the connection
+// they agreed to.
+var (
+	homeNotices = map[string]string{
+		"connected": "Deine Familie ist angelegt und die Kinder sind verbunden. Verbinde als Nächstes das Gerät deines Kindes.",
+	}
+	homeAlerts = map[string]string{
+		"unconnected": "Deine Familie ist angelegt, aber die Kinder wurden nicht verbunden. Verbindet sie unter «Kontakte» mit einem Code.",
+	}
+)
 
 // shortVersion keeps a build stamp readable on a phone: a commit id is cut
 // to its first twelve characters.
@@ -126,16 +140,18 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 	fonts := fontassets.FaceCSS(def.Typography.Heading, def.Typography.Body)
 	_ = homePage.Execute(w, struct {
 		Skin, CSRF, Inactive, Version string
+		Alert, Notice                 string
 		CSS                           template.CSS
 		Figure                        template.HTML
 		Children                      []homeChild
 
 		DevicesEnabled, ContactsEnabled, ChatEnabled bool
 		LookEnabled, SecurityEnabled                 bool
-		CanAddChild, CanInvite                       bool
-	}{Skin: def.ID, CSRF: p.CSRFToken, Inactive: strings.Join(h.inactive, ", "), Version: shortVersion(h.version),
+		CanAddChild, CanInvite, InviteConnects       bool
+	}{Alert: homeAlerts[r.URL.Query().Get("done")], Notice: homeNotices[r.URL.Query().Get("done")], Skin: def.ID, CSRF: p.CSRFToken, Inactive: strings.Join(h.inactive, ", "), Version: shortVersion(h.version),
 		CSS: template.CSS(fonts + ".yp-page{" + decls + "}\n" + contactCSS + lostCSS + homeCSS), Figure: figure, Children: children,
 		DevicesEnabled: h.devicesEnabled, ContactsEnabled: h.contactsEnabled, ChatEnabled: h.chat != nil,
 		LookEnabled: h.looks != nil, SecurityEnabled: h.securityEnabled,
-		CanAddChild: h.children != nil && full, CanInvite: h.inviteEnabled && full})
+		CanAddChild: h.children != nil && full, CanInvite: h.inviteEnabled && full,
+		InviteConnects: h.inviteEnabled && full && h.contactsEnabled})
 }

@@ -123,24 +123,70 @@ func (s *fakeSessions) IssueVerified(w http.ResponseWriter, guardianID, tenantID
 	return nil
 }
 
+type connection struct{ inviterGuardian, inviterTenant, inviterChild, guardian, tenant, child string }
+
+// fakeConnections knows which guardian may approve contacts for which child
+// and records the connections it is asked to make.
+type fakeConnections struct {
+	mu    sync.Mutex
+	names map[string]string // "guardian/tenant/child" -> first name
+	made  []connection
+	fail  bool
+}
+
+func (c *fakeConnections) Inviting(guardianID, tenantID, childID string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	name, ok := c.names[guardianID+"/"+tenantID+"/"+childID]
+	return name, ok
+}
+
+func (c *fakeConnections) Connect(inviterGuardian, inviterTenant, inviterChild, guardian, tenant, child string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.fail {
+		return errors.New("not allowed")
+	}
+	c.made = append(c.made, connection{inviterGuardian, inviterTenant, inviterChild, guardian, tenant, child})
+	return nil
+}
+
 type rig struct {
-	h         *Handler
-	routes    http.Handler
-	store     *Store
-	clock     *clock
-	directory *fakeDirectory
-	families  *fakeFamilies
-	mailer    *fakeMailer
-	sessions  *fakeSessions
+	connections *fakeConnections
+	h           *Handler
+	routes      http.Handler
+	store       *Store
+	clock       *clock
+	directory   *fakeDirectory
+	families    *fakeFamilies
+	mailer      *fakeMailer
+	sessions    *fakeSessions
 }
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
+	return newRigWith(t, nil)
+}
+
+// newConnectingRig is an installation on which contacts are switched on:
+// Anna may approve contacts for Lea.
+func newConnectingRig(t *testing.T) *rig {
+	t.Helper()
+	return newRigWith(t, &fakeConnections{names: map[string]string{"anna/family-a/lea": "Lea"}})
+}
+
+func newRigWith(t *testing.T, connections *fakeConnections) *rig {
+	t.Helper()
 	store, c, _ := newStore(t)
-	r := &rig{store: store, clock: c,
+	r := &rig{store: store, clock: c, connections: connections,
 		directory: &fakeDirectory{emails: map[string][2]string{"anna@example.org": {"anna", "family-a"}}, inactive: map[string]bool{}},
 		families:  &fakeFamilies{}, mailer: &fakeMailer{}, sessions: &fakeSessions{}}
-	h, err := New(Config{Origin: "https://yapuno.example", Store: store, Directory: r.directory, Families: r.families, Mailer: r.mailer, Sessions: r.sessions, Now: c.now})
+	cfg := Config{Origin: "https://yapuno.example", Store: store, Directory: r.directory, Families: r.families, Mailer: r.mailer, Sessions: r.sessions, Now: c.now}
+	if connections != nil {
+		// Assign only a non-nil value: a typed nil would be a non-nil interface.
+		cfg.Connections, cfg.ParentsChat = connections, true
+	}
+	h, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,9 +194,28 @@ func newRig(t *testing.T) *rig {
 	return r
 }
 
+// inviteFor creates an invitation with which Anna approves a contact for Lea.
+func (r *rig) inviteFor(t *testing.T, child string) (string, Invitation) {
+	t.Helper()
+	code, inv, err := r.store.Invite("anna", "family-a", child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code, inv
+}
+
+// confirmed runs a registration up to the confirmation link and returns its token.
+func (r *rig) confirmed(t *testing.T, code, email, child string) string {
+	t.Helper()
+	if rec := r.post("/join/request", request(code, email, child)); rec.Code != http.StatusOK {
+		t.Fatalf("request: %d %s", rec.Code, rec.Body)
+	}
+	return tokenOf(t, r.mailer.last(t).link)
+}
+
 func (r *rig) invite(t *testing.T) (string, Invitation) {
 	t.Helper()
-	code, inv, err := r.store.Invite("anna", "family-a")
+	code, inv, err := r.store.Invite("anna", "family-a", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,34 +307,41 @@ func TestAnInvitedGuardianRegistersAFamilyAndIsSignedIn(t *testing.T) {
 }
 
 func TestPagesAreNotCachedCarryNoScriptAndUseSkinTokensOnly(t *testing.T) {
-	r := newRig(t)
-	code, _ := r.invite(t)
-	r.post("/join/request", request(code, "bruno@example.org", "Leo"))
-	token := tokenOf(t, r.mailer.last(t).link)
-	hex := regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b`)
-	for name, rec := range map[string]*httptest.ResponseRecorder{
-		"join":    r.get("/join?code=" + code),
-		"invalid": r.get("/join?code=" + strings.Repeat("A", 22)),
-		"asked":   r.post("/join/request", request(code, "carla@example.org", "Lia")),
-		"confirm": r.get("/join/verify?token=" + token),
-		"refused": r.post("/join/verify", url.Values{"token": {strings.Repeat("A", 43)}}),
-	} {
-		body := rec.Body.String()
-		if rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("Referrer-Policy") != "no-referrer" ||
-			rec.Header().Get("X-Frame-Options") != "DENY" || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "default-src 'none'") ||
-			!strings.Contains(rec.Header().Get("Content-Security-Policy"), "form-action 'self'") {
-			t.Errorf("%s: headers %v", name, rec.Header())
+	// Once without and once with the offer to connect the children.
+	for variant, r := range map[string]*rig{"plain": newRig(t), "connecting": newConnectingRig(t)} {
+		code, _ := r.inviteFor(t, "lea")
+		r.post("/join/request", request(code, "bruno@example.org", "Leo"))
+		token := tokenOf(t, r.mailer.last(t).link)
+		hex := regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b`)
+		confirm := r.get("/join/verify?token=" + token)
+		if offered := strings.Contains(confirm.Body.String(), `name="connect"`); offered != (variant == "connecting") {
+			t.Fatalf("%s: connection offered: %v", variant, offered)
 		}
-		if strings.Contains(body, "<script") || !strings.Contains(body, `<html lang="de">`) || !strings.Contains(body, "width=device-width") {
-			t.Errorf("%s: page shell", name)
-		}
-		style := body[strings.Index(body, "<style>")+7 : strings.Index(body, "</style>")]
-		component := style[strings.Index(style, "body{margin:0}"):]
-		if hex.MatchString(component) || !strings.Contains(component, "var(--yp-") {
-			t.Errorf("%s: component styles must use skin tokens only", name)
-		}
-		if !strings.Contains(body, "synthetischen Profilen") {
-			t.Errorf("%s: preview note missing", name)
+		for name, rec := range map[string]*httptest.ResponseRecorder{
+			"join":    r.get("/join?code=" + code),
+			"invalid": r.get("/join?code=" + strings.Repeat("A", 22)),
+			"asked":   r.post("/join/request", request(code, "carla@example.org", "Lia")),
+			"confirm": confirm,
+			"refused": r.post("/join/verify", url.Values{"token": {strings.Repeat("A", 43)}}),
+		} {
+			name = variant + " " + name
+			body := rec.Body.String()
+			if rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("Referrer-Policy") != "no-referrer" ||
+				rec.Header().Get("X-Frame-Options") != "DENY" || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "default-src 'none'") ||
+				!strings.Contains(rec.Header().Get("Content-Security-Policy"), "form-action 'self'") {
+				t.Errorf("%s: headers %v", name, rec.Header())
+			}
+			if strings.Contains(body, "<script") || !strings.Contains(body, `<html lang="de">`) || !strings.Contains(body, "width=device-width") {
+				t.Errorf("%s: page shell", name)
+			}
+			style := body[strings.Index(body, "<style>")+7 : strings.Index(body, "</style>")]
+			component := style[strings.Index(style, "body{margin:0}"):]
+			if hex.MatchString(component) || !strings.Contains(component, "var(--yp-") {
+				t.Errorf("%s: component styles must use skin tokens only", name)
+			}
+			if !strings.Contains(body, "synthetischen Profilen") {
+				t.Errorf("%s: preview note missing", name)
+			}
 		}
 	}
 }
