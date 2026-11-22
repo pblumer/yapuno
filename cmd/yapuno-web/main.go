@@ -32,6 +32,7 @@ import (
 	"github.com/pblumer/yapuno/internal/guardianlogin"
 	"github.com/pblumer/yapuno/internal/guardianmailer"
 	"github.com/pblumer/yapuno/internal/guardiansession"
+	"github.com/pblumer/yapuno/internal/invitenotice"
 	"github.com/pblumer/yapuno/internal/messages"
 	"github.com/pblumer/yapuno/internal/pairingweb"
 	"github.com/pblumer/yapuno/internal/reports"
@@ -251,6 +252,8 @@ type invitedContacts struct {
 		Cards(guardianID, tenantID string) []familydashboard.ChildCard
 	}
 	contacts *contacts.Store
+	// notify, if set, tells the guardians of the inviting child afterwards.
+	notify func(tenantID, childID string)
 }
 
 func (c invitedContacts) Inviting(guardianID, tenantID, childID string) (string, bool) {
@@ -265,6 +268,10 @@ func (c invitedContacts) Inviting(guardianID, tenantID, childID string) (string,
 func (c invitedContacts) Connect(inviterGuardian, inviterTenant, inviterChild, guardianID, tenantID, childID string) error {
 	_, err := c.contacts.Connect(inviterGuardian, contacts.Party{TenantID: inviterTenant, ChildID: inviterChild},
 		guardianID, contacts.Party{TenantID: tenantID, ChildID: childID})
+	if err == nil && c.notify != nil {
+		// The inviting guardian approved before knowing who would register.
+		c.notify(inviterTenant, inviterChild)
+	}
 	return err
 }
 
@@ -367,7 +374,16 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		if opt.contacts != nil {
 			// With contacts an invitation can also connect the children.
 			parentsChat := opt.guardianChat != nil
-			joinConfig.Connections, joinConfig.ParentsChat = invitedContacts{families: store, contacts: opt.contacts}, parentsChat
+			connections := invitedContacts{families: store, contacts: opt.contacts}
+			// The lock-aware directory keeps locked guardians out of the recipients.
+			if mailer, ok := sender.(invitenotice.Mailer); ok {
+				notifier, err := invitenotice.New(store, directory, mailer)
+				if err != nil {
+					return nil, err
+				}
+				connections.notify, inviteOptions.Notice = notifier.Connected, true
+			}
+			joinConfig.Connections, joinConfig.ParentsChat = connections, parentsChat
 			inviteOptions.Connect, inviteOptions.ParentsChat = true, parentsChat
 		}
 		join, err := signup.New(joinConfig)

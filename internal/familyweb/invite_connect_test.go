@@ -164,3 +164,26 @@ func TestTheParentsChannelIsOnlyMentionedOnTheInvitePageWhereItExists(t *testing
 		t.Fatalf("page: %s", body)
 	}
 }
+
+// The page only promises a notice by e-mail where one is sent.
+func TestTheInvitePageSaysWhetherTheFamilyIsToldByMail(t *testing.T) {
+	iw := newInviteWorld(t)
+	with, err := NewInvitePages(testAuth{session: sessionA}, iw.invitations, iw.families, "https://yapuno.example", InviteOptions{Connect: true, Notice: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := inviteGet(with, "").Body.String(); !strings.Contains(body, "schickt euch dann eine E-Mail") {
+		t.Fatalf("page does not mention the notice: %s", body)
+	}
+	if body := inviteGet(iw.connecting(t, testAuth{session: sessionA}), "").Body.String(); strings.Contains(body, "E-Mail") {
+		t.Fatal("page promises a mail that is not sent")
+	}
+	// Without connections there is nothing to be told about.
+	plain, err := NewInvitePages(testAuth{session: sessionA}, iw.invitations, iw.families, "https://yapuno.example", InviteOptions{Notice: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := inviteGet(plain, "").Body.String(); strings.Contains(body, "E-Mail") {
+		t.Fatal("page mentions a notice although nothing is connected")
+	}
+}

@@ -41,6 +41,9 @@ type InviteOptions struct {
 	// ParentsChat says that guardians of connected children can write to
 	// each other, so the page says so before the guardian approves.
 	ParentsChat bool
+	// Notice says that the guardians of the named child are e-mailed when
+	// the invitation connects the children.
+	Notice bool
 }
 
 // NewInvitePages serves "invite a family": a guardian with full authority
@@ -53,7 +56,7 @@ func NewInvitePages(auth Authenticator, invitations InvitationStore, families Fa
 		u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || u.Opaque != "" {
 		return nil, errors.New("authenticator, invitation store, family store and an HTTPS origin are required")
 	}
-	h := &inviteHandler{auth: auth, invitations: invitations, families: families, origin: strings.TrimRight(origin, "/"), looks: opt.Looks, connect: opt.Connect, parentsChat: opt.ParentsChat}
+	h := &inviteHandler{auth: auth, invitations: invitations, families: families, origin: strings.TrimRight(origin, "/"), looks: opt.Looks, connect: opt.Connect, parentsChat: opt.ParentsChat, notice: opt.Notice}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /family/invite", h.view)
 	mux.HandleFunc("POST /family/invite", h.create)
@@ -69,6 +72,7 @@ type inviteHandler struct {
 	looks       AppearanceStore
 	connect     bool
 	parentsChat bool
+	notice      bool
 }
 
 // inviteNotices are the only texts a redirect can select.
@@ -96,7 +100,7 @@ var invitePage = template.Must(template.New("invite").Parse(inviteHead + `
 <section aria-labelledby="yp-know"><h2 id="yp-know">Was eine Einladung bewirkt</h2><ul class="yp-facts">
 <li>Gib den Link nur Erwachsenen weiter, die du persönlich kennst. Wer den Link hat, kann eine eigene Familie anlegen.</li>
 <li>Der Link gilt 7 Tage und nur einmal.</li>
-{{if .Connect}}<li>Wählst du ein Kind, sieht die eingeladene Person dessen Vornamen. Stimmt auch sie zu, sind die beiden Kinder sofort Kontakte, ohne dass du noch einmal gefragt wirst.</li>
+{{if .Connect}}<li>Wählst du ein Kind, sieht die eingeladene Person dessen Vornamen. Stimmt auch sie zu, sind die beiden Kinder sofort Kontakte, ohne dass du noch einmal gefragt wirst.{{if .Mail}} Yapuno schickt euch dann eine E-Mail.{{end}}</li>
 <li>Du siehst das andere Kind danach unter «Kontakte» und kannst die Verbindung jederzeit beenden.{{if .ParentsChat}} Solange sie besteht, können sich auch die Eltern beider Familien schreiben.{{end}}</li>
 <li>Ohne Kind bleibt es bei der Einladung: Du siehst nicht, wer sich registriert, und die andere Familie sieht nichts von euch.</li>
 {{else}}<li>Du siehst nicht, wer sich damit registriert. Die andere Familie sieht nichts von euch.</li>
@@ -181,9 +185,10 @@ func (h *inviteHandler) render(w http.ResponseWriter, p Session, status int, ale
 		Children                  []inviteChild
 		CanCreate                 bool
 		Connect, ParentsChat      bool
+		Mail                      bool
 		Max                       int
 	}{Skin: skinID, CSRF: p.CSRFToken, Alert: alert, Notice: notice, CSS: css, Pending: rows, Children: children,
-		CanCreate: len(rows) < signup.MaxOpenPerGuardian, Connect: h.connect, ParentsChat: h.parentsChat, Max: signup.MaxOpenPerGuardian})
+		CanCreate: len(rows) < signup.MaxOpenPerGuardian, Connect: h.connect, ParentsChat: h.parentsChat, Mail: h.notice, Max: signup.MaxOpenPerGuardian})
 }
 
 type inviteChild struct{ ID, Name string }

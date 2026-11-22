@@ -1,7 +1,7 @@
 # ADR-DRAFT: An invitation to register may also connect the two families' children
 
 - **Status:** Proposed
-- **Implementation:** On a branch, only where invited self-registration and contacts are both switched on: optional child in an invitation, choice in the last step of the registration, direct contact creation (pending review)
+- **Implementation:** Only where invited self-registration and contacts are both switched on: optional child in an invitation, choice in the last step of the registration, direct contact creation, notice by e-mail to the guardians of the inviting child (pending review)
 - **Date:** 2026-11-22
 - **Deciders:** maintainers; security, privacy and child-safety reviewers required
 
@@ -33,6 +33,7 @@ Chosen option (product owner decision of 2026-11-22): **option 2**.
 - The invited guardian decides in the last step, after the mailbox is confirmed, by pressing one of two buttons: create the family and connect the children, or only create the family. Only the exact answer "yes" connects; a request with two answers is refused without using up the link.
 - The contact is created after the family and the identity are stored. The contact store checks the current contact authority of both guardians for exactly these two children; an existing request or contact between them is left as it is. An invitation of a guardian who is locked or inactive is void as before.
 - If the connection fails, the registration stands and the new guardian is told that the children are not connected.
+- After a connection every guardian who currently holds contact authority for the inviting child, is active and not locked, is told by e-mail. The mail names only that guardian's own child, never the other family or its child, and carries no link; it says where the new contact can be seen and ended. It is sent in the background and does not delay the registration. A mail that cannot be sent is logged without address or name and changes nothing else. The invite page announces the mail only where it is sent.
 - The resulting contact is an ordinary one: either family ends it at any time, and everything that follows from a contact follows from this one too, including the conversation between the guardians of both families where that is switched on. The pages say so before either guardian approves.
 - Without a named child, without contacts on the installation, or without the invited guardian's "yes", nothing is connected.
 
@@ -40,14 +41,14 @@ Chosen option (product owner decision of 2026-11-22): **option 2**.
 - Positive: one hand-over for the common case; both approvals remain explicit; the contact code remains for families that are already registered.
 - Negative / accepted trade-offs:
   - **The inviting guardian approves before knowing who registers.** Whoever obtains the link can register a family and become a contact of the named child without the inviting family confirming a name. With the contact code the inviting family at least sees a self-chosen display name before confirming; here it sees the name only afterwards, on the contact page.
-  - **The inviting family is not notified** when the contact becomes active. Nothing tells a guardian that an invitation was used.
+  - **The inviting family learns of the contact only afterwards**, by e-mail and on the contact page. Until a guardian reads the mail and acts, the children can write to each other. A mail can be delayed, filtered or lost, and nothing in the application marks the contact as new. A registration that connects nobody is not announced.
   - The first name of the inviting child is disclosed to everybody who opens the link, before any mailbox is confirmed.
-  - Another guardian of the inviting child is neither asked nor told, as with the contact code. Where guardians can write to each other, the new guardian can also write to that other guardian.
+  - Another guardian of the inviting child is not asked. Unlike with the contact code, that guardian is told by the same e-mail. Where guardians can write to each other, the new guardian can also write to that other guardian.
   - Both guardians are self-declared ([invited self-registration ADR draft](draft-invited-self-registration.md)); a contact made this way joins two families of which at most one was checked by the operator.
   - The link is valid for seven days, much longer than a contact code (24 hours).
   - A crash between storing the identity and creating the contact leaves a registered family without the contact; the families then use a contact code.
 - Open questions and review gates:
-  - Whether the inviting guardians must be notified by e-mail when a contact is created this way, and whether the contact should be marked as new until a guardian has looked at it.
+  - Whether the contact should be marked as new in the application until a guardian has looked at it, and whether the children may write before that.
   - Whether option 3 is required for real children, or a shorter validity for invitations that name a child.
   - Whether the inviting child's name may be shown before the mailbox is confirmed.
   - Notification and consent of further guardians of both children.

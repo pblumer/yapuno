@@ -72,7 +72,8 @@ control, and creates child profiles themselves. Nobody registers without an
 invitation. Unless the inviting guardian names one of their children, registration
 reveals nothing about other families and connects no children; with a named
 child the invited guardian can approve the contact in the last step, and the
-children are then connected without a separate contact code
+children are then connected without a separate contact code and the guardians
+of the inviting child are told by e-mail
 ([proposed ADR](docs/adr/draft-invitation-connects-children.md)).
 **Guardianship is then self-declared and not checked**, so the
 switch is for trials with synthetic profiles only. See
