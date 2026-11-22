@@ -40,7 +40,7 @@ func newStore(t *testing.T) (*Store, *clock, string) {
 
 func TestInviteReturnsAOneTimeCodeAndStoresOnlyItsDigest(t *testing.T) {
 	s, c, path := newStore(t)
-	code, inv, err := s.Invite("anna", "family-a")
+	code, inv, err := s.Invite("anna", "family-a", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestInviteReturnsAOneTimeCodeAndStoresOnlyItsDigest(t *testing.T) {
 	if err != nil || got.ID != inv.ID || got.Guardian != "anna" || got.Tenant != "family-a" {
 		t.Fatalf("lookup: %+v %v", got, err)
 	}
-	other, _, _ := s.Invite("anna", "family-a")
+	other, _, _ := s.Invite("anna", "family-a", "")
 	if other == code {
 		t.Fatal("codes repeat")
 	}
@@ -75,7 +75,7 @@ func TestInviteReturnsAOneTimeCodeAndStoresOnlyItsDigest(t *testing.T) {
 
 func TestLookupRefusesUnknownMalformedExpiredAndUsedCodes(t *testing.T) {
 	s, c, _ := newStore(t)
-	code, inv, _ := s.Invite("anna", "family-a")
+	code, inv, _ := s.Invite("anna", "family-a", "")
 	for _, bad := range []string{"", "short", code + "x", strings.Repeat("A", 22), code[:21] + "!", " " + code[1:]} {
 		if _, err := s.Lookup(bad); !errors.Is(err, ErrNotFound) {
 			t.Errorf("%q: %v", bad, err)
@@ -99,7 +99,7 @@ func TestLookupRefusesUnknownMalformedExpiredAndUsedCodes(t *testing.T) {
 
 func TestConsumeWorksExactlyOnce(t *testing.T) {
 	s, c, path := newStore(t)
-	code, inv, _ := s.Invite("anna", "family-a")
+	code, inv, _ := s.Invite("anna", "family-a", "")
 	var wg sync.WaitGroup
 	wins := make(chan bool, 20)
 	for i := 0; i < 20; i++ {
@@ -139,7 +139,7 @@ func TestConsumeWorksExactlyOnce(t *testing.T) {
 
 func TestRestoreReopensOnlyTheMatchingUse(t *testing.T) {
 	s, _, _ := newStore(t)
-	code, inv, _ := s.Invite("anna", "family-a")
+	code, inv, _ := s.Invite("anna", "family-a", "")
 	if err := s.Restore(inv.ID, "family-b"); err == nil {
 		t.Fatal("restored an invitation that was not used")
 	}
@@ -161,7 +161,7 @@ func TestOpenInvitationsAreLimitedPerGuardianAndListedOnlyToTheirOwner(t *testin
 	s, c, _ := newStore(t)
 	var first Invitation
 	for i := 0; i < MaxOpenPerGuardian; i++ {
-		_, inv, err := s.Invite("anna", "family-a")
+		_, inv, err := s.Invite("anna", "family-a", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -170,14 +170,14 @@ func TestOpenInvitationsAreLimitedPerGuardianAndListedOnlyToTheirOwner(t *testin
 		}
 		c.add(time.Minute)
 	}
-	if _, _, err := s.Invite("anna", "family-a"); !errors.Is(err, ErrLimit) {
+	if _, _, err := s.Invite("anna", "family-a", ""); !errors.Is(err, ErrLimit) {
 		t.Fatalf("over the limit: %v", err)
 	}
 	// Another guardian, and the same id in another family, have their own limit.
-	if _, _, err := s.Invite("bruno", "family-a"); err != nil {
+	if _, _, err := s.Invite("bruno", "family-a", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Invite("anna", "family-z"); err != nil {
+	if _, _, err := s.Invite("anna", "family-z", ""); err != nil {
 		t.Fatal(err)
 	}
 	mine := s.Pending("anna", "family-a")
@@ -202,7 +202,7 @@ func TestOpenInvitationsAreLimitedPerGuardianAndListedOnlyToTheirOwner(t *testin
 	if _, err := s.Usable(first.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatal("withdrawn invitation still usable")
 	}
-	if _, _, err := s.Invite("anna", "family-a"); err != nil {
+	if _, _, err := s.Invite("anna", "family-a", ""); err != nil {
 		t.Fatalf("after withdrawal: %v", err)
 	}
 	// Expired invitations free their place as well.
@@ -210,11 +210,11 @@ func TestOpenInvitationsAreLimitedPerGuardianAndListedOnlyToTheirOwner(t *testin
 	if len(s.Pending("anna", "family-a")) != 0 {
 		t.Fatal("expired invitations listed")
 	}
-	if _, _, err := s.Invite("anna", "family-a"); err != nil {
+	if _, _, err := s.Invite("anna", "family-a", ""); err != nil {
 		t.Fatalf("after expiry: %v", err)
 	}
 	for _, bad := range [][2]string{{"", "t"}, {"g", ""}, {"g\n", "t"}} {
-		if _, _, err := s.Invite(bad[0], bad[1]); !errors.Is(err, ErrInvalid) {
+		if _, _, err := s.Invite(bad[0], bad[1], ""); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%q: %v", bad, err)
 		}
 	}
@@ -222,7 +222,7 @@ func TestOpenInvitationsAreLimitedPerGuardianAndListedOnlyToTheirOwner(t *testin
 
 func TestMailsPerInvitationAreCountedDurably(t *testing.T) {
 	s, c, path := newStore(t)
-	_, inv, _ := s.Invite("anna", "family-a")
+	_, inv, _ := s.Invite("anna", "family-a", "")
 	for i := 0; i < MaxMailsPerInvitation-1; i++ {
 		if err := s.CountMail(inv.ID); err != nil {
 			t.Fatalf("mail %d: %v", i, err)
@@ -247,7 +247,7 @@ func TestMailsPerInvitationAreCountedDurably(t *testing.T) {
 func TestTheNumberOfRegisteredFamiliesIsCapped(t *testing.T) {
 	s, _, _ := newStore(t)
 	for i := 0; i < MaxFamilies; i++ {
-		_, inv, err := s.Invite("anna", "family-a")
+		_, inv, err := s.Invite("anna", "family-a", "")
 		if err != nil {
 			t.Fatalf("invitation %d: %v", i, err)
 		}
@@ -255,16 +255,16 @@ func TestTheNumberOfRegisteredFamiliesIsCapped(t *testing.T) {
 			t.Fatalf("use %d: %v", i, err)
 		}
 	}
-	if _, _, err := s.Invite("anna", "family-a"); !errors.Is(err, ErrFull) {
+	if _, _, err := s.Invite("anna", "family-a", ""); !errors.Is(err, ErrFull) {
 		t.Fatalf("invitation beyond the cap: %v", err)
 	}
 }
 
 func TestAnInvitationCreatedBeforeTheCapCannotExceedIt(t *testing.T) {
 	s, _, _ := newStore(t)
-	_, spare, _ := s.Invite("bruno", "family-b")
+	_, spare, _ := s.Invite("bruno", "family-b", "")
 	for i := 0; i < MaxFamilies; i++ {
-		_, inv, _ := s.Invite("anna", "family-a")
+		_, inv, _ := s.Invite("anna", "family-a", "")
 		if err := s.Consume(inv.ID, "joined"+string(rune('A'+i%26))+string(rune('a'+i/26))); err != nil {
 			t.Fatal(err)
 		}
@@ -288,6 +288,7 @@ func TestOpenFailsClosed(t *testing.T) {
 		"trailing data":   `{"invitations":[]} {}`,
 		"empty digest":    `{"invitations":[{"id":"a","digest":"","guardian":"g","tenant":"t","created_at":"2026-01-01T00:00:00Z","expires_at":"2026-01-02T00:00:00Z"}]}`,
 		"duplicate id":    `{"invitations":[{"id":"a","digest":"` + strings.Repeat("a", 64) + `","guardian":"g","tenant":"t","created_at":"2026-01-01T00:00:00Z","expires_at":"2026-01-02T00:00:00Z"},{"id":"a","digest":"` + strings.Repeat("b", 64) + `","guardian":"g","tenant":"t","created_at":"2026-01-01T00:00:00Z","expires_at":"2026-01-02T00:00:00Z"}]}`,
+		"invalid child":   `{"invitations":[{"id":"a","digest":"` + strings.Repeat("a", 64) + `","guardian":"g","tenant":"t","child":"c\nd","created_at":"2026-01-01T00:00:00Z","expires_at":"2026-01-02T00:00:00Z"}]}`,
 		"used, no tenant": `{"invitations":[{"id":"a","digest":"` + strings.Repeat("a", 64) + `","guardian":"g","tenant":"t","created_at":"2026-01-01T00:00:00Z","expires_at":"2026-01-02T00:00:00Z","used_at":"2026-01-01T01:00:00Z"}]}`,
 	} {
 		path := filepath.Join(t.TempDir(), "signup.json")
@@ -314,9 +315,9 @@ func TestOpenFailsClosed(t *testing.T) {
 
 func TestAFailedWriteChangesNothing(t *testing.T) {
 	s, _, _ := newStore(t)
-	code, inv, _ := s.Invite("anna", "family-a")
+	code, inv, _ := s.Invite("anna", "family-a", "")
 	s.failWrite = true
-	if _, _, err := s.Invite("anna", "family-a"); err == nil {
+	if _, _, err := s.Invite("anna", "family-a", ""); err == nil {
 		t.Fatal("invitation acknowledged without a durable write")
 	}
 	if err := s.Consume(inv.ID, "family-b"); err == nil {
@@ -333,5 +334,55 @@ func TestAFailedWriteChangesNothing(t *testing.T) {
 		if err := s.CountMail(inv.ID); err != nil {
 			t.Fatalf("the failed count used up budget: %v", err)
 		}
+	}
+}
+
+// An invitation can name one child of the inviting family. That is the
+// inviting guardian's approval for a contact with the invited family's child.
+func TestInvitationCanNameTheInvitingChild(t *testing.T) {
+	s, c, path := newStore(t)
+	code, inv, err := s.Invite("anna", "family-a", "lea")
+	if err != nil || inv.Child != "lea" {
+		t.Fatalf("invite: %+v %v", inv, err)
+	}
+	plainCode, plain, err := s.Invite("anna", "family-a", "")
+	if err != nil || plain.Child != "" {
+		t.Fatalf("invite without child: %+v %v", plain, err)
+	}
+	reopened, err := Open(path, c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, store := range []*Store{s, reopened} {
+		if got, err := store.Lookup(code); err != nil || got.Child != "lea" {
+			t.Fatalf("lookup: %+v %v", got, err)
+		}
+		if got, err := store.Usable(inv.ID); err != nil || got.Child != "lea" {
+			t.Fatalf("usable: %+v %v", got, err)
+		}
+		if got, err := store.Lookup(plainCode); err != nil || got.Child != "" {
+			t.Fatalf("lookup without child: %+v %v", got, err)
+		}
+		pending := store.Pending("anna", "family-a")
+		if len(pending) != 2 || pending[0].Child != "lea" || pending[1].Child != "" {
+			t.Fatalf("pending: %+v", pending)
+		}
+	}
+	// A file written before invitations could name a child has no such key.
+	raw, _ := os.ReadFile(path)
+	if strings.Count(string(raw), `"child"`) != 1 {
+		t.Fatalf("child key written for an invitation without one: %s", raw)
+	}
+	for _, bad := range []string{"lea\n", "le\x00a", strings.Repeat("x", 129)} {
+		if _, _, err := s.Invite("anna", "family-a", bad); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+	// The child stays on record once the invitation is used.
+	if err := s.Consume(inv.ID, "family-b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(path, c.now); err != nil {
+		t.Fatalf("used invitation with a child does not reopen: %v", err)
 	}
 }

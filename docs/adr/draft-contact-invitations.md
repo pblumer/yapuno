@@ -27,7 +27,7 @@ A decision is needed on how a relationship crosses the family boundary without w
 1. **Shared tenant per friendship or class.** Reuses same-tenant checks, but mixes unrelated families' administrative authority; already rejected for classrooms.
 2. **Directory or search by name, email or phone.** Convenient; violates the no-discovery invariant and leaks who uses the service.
 3. **One-time invitation code, redeemed by the other family, then confirmed by the inviting family** (proposed). The contact record is the only cross-family relationship and names exactly two tenant-qualified children.
-4. **Invitation whose redemption alone activates the contact.** One step fewer; anyone who obtains the code becomes a contact without the inviting family ever seeing who redeemed it.
+4. **Invitation whose redemption alone activates the contact.** One step fewer; anyone who obtains the code becomes a contact without the inviting family ever seeing who redeemed it. Not chosen for contact codes. A later draft proposes it for the one case in which the other family registers through an invitation link ([ADR draft](draft-invitation-connects-children.md)).
 5. **Guardian-to-guardian link first, then children.** Models adult relationships explicitly; larger scope and depends on adult participants (#12).
 
 ## Proposed decision outcome

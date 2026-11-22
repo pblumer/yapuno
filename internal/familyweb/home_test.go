@@ -111,3 +111,58 @@ func TestTheOverviewShowsOnlyTheGuardiansOwnChildrenAndRights(t *testing.T) {
 		t.Errorf("overview without rights: %s", page)
 	}
 }
+
+func (cw *chatWorld) homeAt(t *testing.T, opt Options, target string) string {
+	t.Helper()
+	h, err := NewWithOptions(testAuth{session: sessionA}, cw.families, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, target, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("%s: %d", target, w.Code)
+	}
+	return w.Body.String()
+}
+
+// A guardian who has just registered through an invitation learns whether
+// the children were connected, as they asked.
+func TestTheOverviewSaysHowARegistrationWithConnectionEnded(t *testing.T) {
+	cw := newChatWorld(t)
+	opt := Options{ContactPages: true, DevicePages: true, SecurityPages: true}
+	connected := cw.homeAt(t, opt, "/family?done=connected")
+	if !strings.Contains(connected, `role="status"`) || !strings.Contains(connected, "Kinder sind verbunden") || strings.Contains(connected, `role="alert"`) {
+		t.Fatalf("connected: %s", connected)
+	}
+	unconnected := cw.homeAt(t, opt, "/family?done=unconnected")
+	if !strings.Contains(unconnected, `role="alert"`) || !strings.Contains(unconnected, "nicht verbunden") || !strings.Contains(unconnected, "Kontakte") || strings.Contains(unconnected, `role="status"`) {
+		t.Fatalf("unconnected: %s", unconnected)
+	}
+	for _, target := range []string{"/family", "/family?done=", "/family?done=%3Cb%3Ehello", "/family?done=Connected"} {
+		if body := cw.homeAt(t, opt, target); strings.Contains(body, `role="status"`) || strings.Contains(body, `role="alert"`) || strings.Contains(body, "hello") {
+			t.Errorf("%s shows a notice", target)
+		}
+	}
+}
+
+func TestTheGuideDescribesTheShortestWayThisInstallationOffers(t *testing.T) {
+	cw := newChatWorld(t)
+	// Invitations and contacts: one invitation registers and connects.
+	both := cw.homeAt(t, Options{ContactPages: true, DevicePages: true, InvitePages: true, Children: cw.families}, "/family")
+	for _, want := range []string{"wähle das Kind", "stimmt der Verbindung zu", "bereits registriert"} {
+		if !strings.Contains(both, want) {
+			t.Errorf("guide lacks %q", want)
+		}
+	}
+	// Invitations without contacts cannot connect anybody.
+	inviteOnly := cw.homeAt(t, Options{DevicePages: true, InvitePages: true, Children: cw.families}, "/family")
+	if strings.Contains(inviteOnly, "wähle das Kind") || !strings.Contains(inviteOnly, "Kontakte zwischen Familien sind auf dieser Installation nicht eingeschaltet") {
+		t.Fatalf("guide promises a connection without contacts: %s", inviteOnly)
+	}
+	// Contacts without invitations: the code is the only way.
+	contactsOnly := cw.homeAt(t, Options{ContactPages: true, DevicePages: true}, "/family")
+	if strings.Contains(contactsOnly, "wähle das Kind") || strings.Contains(contactsOnly, "bereits registriert") || !strings.Contains(contactsOnly, "erstelle einen Code") {
+		t.Fatalf("guide: %s", contactsOnly)
+	}
+}

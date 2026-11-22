@@ -46,6 +46,17 @@ type Sessions interface {
 	IssueVerified(w http.ResponseWriter, guardianID, tenantID string) error
 }
 
+// Connections makes two children contacts when both guardians agreed: the
+// inviting guardian by naming a child in the invitation, the invited one in
+// the last step of the registration.
+type Connections interface {
+	// Inviting returns the first name of the inviting child, if this guardian
+	// may approve contacts for it right now.
+	Inviting(guardianID, tenantID, childID string) (string, bool)
+	// Connect must check the current authority of both guardians itself.
+	Connect(inviterGuardian, inviterTenant, inviterChild, guardianID, tenantID, childID string) error
+}
+
 type Config struct {
 	Origin    string
 	Store     *Store
@@ -54,6 +65,11 @@ type Config struct {
 	Mailer    Mailer
 	Sessions  Sessions
 	Now       func() time.Time
+	// Connections is optional. Without it an invitation only registers.
+	Connections Connections
+	// ParentsChat says that guardians of connected children can write to
+	// each other on this installation, so the pages say so before asking.
+	ParentsChat bool
 }
 
 // registration is what a confirmation link stands for. It lives in memory
@@ -123,10 +139,12 @@ const pageCSS = `body{margin:0}
 .yp-page ul{margin:0;padding-left:1.3rem;color:var(--yp-text-muted)}
 .yp-page li{margin:.4rem 0}
 .yp-page form{display:flex;flex-direction:column;gap:.6rem}
+.yp-page p+form{margin-top:.9rem}
 .yp-page label.yp-field{display:flex;flex-direction:column;gap:.3rem;font-weight:700}
 .yp-page input[type=email],.yp-page input[type=text]{width:100%;min-height:48px;padding:.6rem .8rem;border:2px solid var(--yp-text-muted);border-radius:var(--yp-radius);background:var(--yp-bg);color:var(--yp-text);font:inherit}
 .yp-check{display:flex;gap:.6rem;align-items:flex-start;min-height:44px;padding:.5rem 0}
 .yp-check input{width:1.4rem;height:1.4rem;flex:none;margin:0;accent-color:var(--yp-accent)}
+.yp-page button.yp-quiet{border:2px solid var(--yp-text-muted);background:var(--yp-surface);color:var(--yp-text)}
 .yp-page button{min-height:48px;padding:.7rem 1rem;border:0;border-radius:var(--yp-radius);background:var(--yp-accent);color:var(--yp-on-accent);font:inherit;font-weight:800;cursor:pointer}
 .yp-link{display:inline-flex;align-items:center;min-height:44px;color:var(--yp-accent-text);font-weight:700}
 .yp-page button:focus-visible,.yp-page input:focus-visible,.yp-link:focus-visible{outline:3px solid var(--yp-focus);outline-offset:2px}
@@ -140,6 +158,7 @@ const shellClose = `<p class="yp-muted">Vorschau mit synthetischen Profilen.</p>
 var joinPage = template.Must(template.New("join").Parse(shellOpen + `
 <h1>Einladung zu Yapuno</h1>
 <p class="yp-muted">Eine Familie, die Yapuno schon nutzt, hat dich eingeladen. Hier legst du deine eigene Familie an.</p>
+{{if .Inviting}}<p class="yp-status">Die Einladung kommt von der Familie von {{.Inviting}}. Im letzten Schritt entscheidest du, ob dein Kind und {{.Inviting}} miteinander schreiben dürfen.</p>{{end}}
 <section aria-labelledby="yp-join"><h2 id="yp-join">Deine Familie anlegen</h2>
 <form method="post" action="/join/request"><input type="hidden" name="code" value="{{.Code}}">
 <label class="yp-field">Deine E-Mail-Adresse<input type="email" name="email" autocomplete="email" required maxlength="254"></label>
@@ -148,9 +167,11 @@ var joinPage = template.Must(template.New("join").Parse(shellOpen + `
 <button type="submit">Bestätigungslink senden</button></form></section>
 <section aria-labelledby="yp-how"><h2 id="yp-how">Gut zu wissen</h2><ul>
 <li>Du erhältst eine E-Mail mit einem Link. Er gilt 10 Minuten. Erst damit wird deine Familie angelegt.</li>
-<li>Die Familie, die dich eingeladen hat, sieht weder deine Adresse noch den Namen deines Kindes.</li>
+{{if .Inviting}}<li>Die Familie, die dich eingeladen hat, sieht deine Adresse nicht. Den Vornamen deines Kindes sieht sie nur, wenn du die Kinder verbindest.</li>
+<li>Verbindest du die Kinder, dürfen sie einander schreiben.{{if .ParentsChat}} Auch die Eltern beider Familien können sich dann schreiben.{{end}} Jede Familie kann die Verbindung jederzeit wieder beenden.</li>
+{{else}}<li>Die Familie, die dich eingeladen hat, sieht weder deine Adresse noch den Namen deines Kindes.</li>
 <li>Eure Kinder sind danach nicht automatisch Kontakte. Dafür braucht es weiterhin die Zustimmung beider Familien.</li>
-<li>Weitere Kinder kannst du nach der Anmeldung selbst anlegen.</li>
+{{end}}<li>Weitere Kinder kannst du nach der Anmeldung selbst anlegen.</li>
 <li>Yapuno prüft nicht, ob du wirklich erziehungsberechtigt bist. Du bestätigst das selbst.</li>
 </ul></section>
 <p><a class="yp-link" href="/login">Schon registriert? Zur Anmeldung</a></p>
@@ -167,7 +188,10 @@ var confirmPage = template.Must(template.New("confirm").Parse(shellOpen + `
 <h1>Familie anlegen</h1>
 <p class="yp-muted">Deine E-Mail-Adresse ist bestätigt. Mit dem nächsten Schritt wird deine Familie angelegt und du bist angemeldet.</p>
 <section aria-labelledby="yp-finish"><h2 id="yp-finish">Letzter Schritt</h2>
-<form method="post" action="/join/verify"><input type="hidden" name="token" value="{{.Token}}"><button type="submit">Jetzt Familie anlegen</button></form></section>
+{{if .Inviting}}<p>Die Einladung kommt von der Familie von {{.Inviting}}. Dürfen {{.Child}} und {{.Inviting}} miteinander schreiben?</p>
+<p class="yp-muted">Die andere Familie hat dem schon zugestimmt. Sagst du Ja, sieht sie den Vornamen deines Kindes{{if .ParentsChat}}, und die Eltern beider Familien können sich schreiben{{end}}. Jede Familie kann die Verbindung jederzeit wieder beenden.</p>
+<form method="post" action="/join/verify"><input type="hidden" name="token" value="{{.Token}}"><button type="submit" name="connect" value="yes">Familie anlegen und Kinder verbinden</button><button class="yp-quiet" type="submit" name="connect" value="no">Nur Familie anlegen</button></form>
+{{else}}<form method="post" action="/join/verify"><input type="hidden" name="token" value="{{.Token}}"><button type="submit">Jetzt Familie anlegen</button></form>{{end}}</section>
 ` + shellClose))
 
 func secureHeaders(w http.ResponseWriter) {
@@ -214,14 +238,30 @@ func (h *Handler) showForm(w http.ResponseWriter, r *http.Request) {
 		h.invalidInvitation(w)
 		return
 	}
-	if _, ok := h.invitation(r.Context(), codes[0]); !ok {
+	inv, ok := h.invitation(r.Context(), codes[0])
+	if !ok {
 		h.invalidInvitation(w)
 		return
 	}
 	_ = joinPage.Execute(w, struct {
-		Title, Code string
-		CSS         template.CSS
-	}{"Einladung", codes[0], h.css})
+		Title, Code, Inviting string
+		ParentsChat           bool
+		CSS                   template.CSS
+	}{"Einladung", codes[0], h.inviting(inv), h.cfg.ParentsChat, h.css})
+}
+
+// inviting names the child the invitation offers a contact with. It is empty
+// when the invitation names none, contacts are off, or the inviting guardian
+// may no longer approve contacts for that child.
+func (h *Handler) inviting(inv Invitation) string {
+	if inv.Child == "" || h.cfg.Connections == nil {
+		return ""
+	}
+	name, ok := h.cfg.Connections.Inviting(inv.Guardian, inv.Tenant, inv.Child)
+	if !ok {
+		return ""
+	}
+	return name
 }
 
 func normalizeEmail(raw string) (string, bool) {
@@ -339,11 +379,24 @@ func (h *Handler) showConfirm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid link", http.StatusBadRequest)
 		return
 	}
-	// Showing the page consumes nothing; only the POST registers.
+	// Showing the page consumes nothing; only the POST registers. A link
+	// that is still good also shows which children it could connect.
+	var child, inviting string
+	h.mu.Lock()
+	reg, exists := h.pending[sha256.Sum256([]byte(tokens[0]))]
+	h.mu.Unlock()
+	if exists && h.cfg.Now().Before(reg.expires) {
+		if inv, err := h.cfg.Store.Usable(reg.invitation); err == nil && h.cfg.Directory.ActiveGuardian(r.Context(), inv.Guardian, inv.Tenant) {
+			if inviting = h.inviting(inv); inviting != "" {
+				child = reg.child
+			}
+		}
+	}
 	_ = confirmPage.Execute(w, struct {
-		Title, Token string
-		CSS          template.CSS
-	}{"Familie anlegen", tokens[0], h.css})
+		Title, Token, Child, Inviting string
+		ParentsChat                   bool
+		CSS                           template.CSS
+	}{"Familie anlegen", tokens[0], child, inviting, h.cfg.ParentsChat, h.css})
 }
 
 func newID(prefix string) (string, error) {
@@ -360,6 +413,12 @@ func (h *Handler) finish(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The choice is one button; two answers are no answer.
+	if len(form["connect"]) > 1 {
+		http.Error(w, "Invalid form", http.StatusBadRequest)
+		return
+	}
+	connect := form.Get("connect") == "yes"
 	token := form.Get("token")
 	if decoded, err := base64.RawURLEncoding.DecodeString(token); err != nil || len(decoded) != 32 || len(token) != 43 {
 		h.invalidLink(w)
@@ -375,7 +434,7 @@ func (h *Handler) finish(w http.ResponseWriter, r *http.Request) {
 		h.invalidLink(w)
 		return
 	}
-	guardianID, tenantID, status := h.register(r.Context(), reg)
+	guardianID, tenantID, connected, status := h.register(r.Context(), reg, connect)
 	switch status {
 	case http.StatusOK:
 	case http.StatusForbidden:
@@ -391,50 +450,68 @@ func (h *Handler) finish(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/family", http.StatusSeeOther)
+	http.Redirect(w, r, "/family"+connected, http.StatusSeeOther)
 }
+
+// What the family page is told about the connection the guardian asked for.
+const (
+	notAsked    = ""
+	connected   = "?done=connected"
+	unconnected = "?done=unconnected"
+)
 
 // register creates the family for a confirmed registration. The invitation
 // is spent first and durably; the family is written before the identity, so
 // an interruption can leave a family nobody can sign in to, but never an
 // identity without a family. Later failures undo the earlier steps.
-func (h *Handler) register(ctx context.Context, reg registration) (guardianID, tenantID string, status int) {
+//
+// With connect the new guardian agreed to the contact the invitation offers.
+// The children are connected last: a failure there leaves a complete family,
+// which can still connect with a contact code.
+func (h *Handler) register(ctx context.Context, reg registration, connect bool) (guardianID, tenantID, outcome string, status int) {
 	h.complete.Lock()
 	defer h.complete.Unlock()
 	inv, err := h.cfg.Store.Usable(reg.invitation)
 	if err != nil || !h.cfg.Directory.ActiveGuardian(ctx, inv.Guardian, inv.Tenant) || h.cfg.Directory.Has(reg.email) {
-		return "", "", http.StatusForbidden
+		return "", "", notAsked, http.StatusForbidden
 	}
 	tenantID, err = newID("f")
 	if err != nil {
-		return "", "", http.StatusServiceUnavailable
+		return "", "", notAsked, http.StatusServiceUnavailable
 	}
 	guardianID, err = newID("g")
 	if err != nil {
-		return "", "", http.StatusServiceUnavailable
+		return "", "", notAsked, http.StatusServiceUnavailable
 	}
 	childID, err := newID("c")
 	if err != nil {
-		return "", "", http.StatusServiceUnavailable
+		return "", "", notAsked, http.StatusServiceUnavailable
 	}
 	if err := h.cfg.Store.Consume(inv.ID, tenantID); err != nil {
 		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrFull) {
-			return "", "", http.StatusForbidden
+			return "", "", notAsked, http.StatusForbidden
 		}
-		return "", "", http.StatusServiceUnavailable
+		return "", "", notAsked, http.StatusServiceUnavailable
 	}
 	if err := h.cfg.Families.CreateFamily(tenantID, guardianID, childID, reg.child); err != nil {
 		h.reopen(inv.ID, tenantID)
-		return "", "", http.StatusServiceUnavailable
+		return "", "", notAsked, http.StatusServiceUnavailable
 	}
 	if err := h.cfg.Directory.Register(reg.email, guardianID, tenantID); err != nil {
 		if err := h.cfg.Families.DiscardFamily(tenantID, guardianID, childID); err != nil {
 			log.Printf("registration: a family without an identity could not be discarded")
 		}
 		h.reopen(inv.ID, tenantID)
-		return "", "", http.StatusServiceUnavailable
+		return "", "", notAsked, http.StatusServiceUnavailable
 	}
-	return guardianID, tenantID, http.StatusOK
+	if !connect || inv.Child == "" || h.cfg.Connections == nil {
+		return guardianID, tenantID, notAsked, http.StatusOK
+	}
+	if err := h.cfg.Connections.Connect(inv.Guardian, inv.Tenant, inv.Child, guardianID, tenantID, childID); err != nil {
+		log.Printf("registration: the children could not be connected; the family is registered")
+		return guardianID, tenantID, unconnected, http.StatusOK
+	}
+	return guardianID, tenantID, connected, http.StatusOK
 }
 
 func (h *Handler) reopen(invitationID, tenantID string) {

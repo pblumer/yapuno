@@ -61,7 +61,7 @@ yapuno-provision -verified -add -families private/families.json -guardians priva
 
 ### Alternative: let further families register themselves
 
-With `YAPUNO_SIGNUP_FILE` only the first family needs provisioning. Its guardian opens **Familie → Eine Familie einladen**, creates a link and passes it on; the invited person registers with their own address and the first child's name, and adds further children under **Weiteres Kind anlegen**. A second guardian for a child still needs `-add`. See [invited self-registration](invited-self-registration.md) for the limits, above all that guardianship is not checked.
+With `YAPUNO_SIGNUP_FILE` only the first family needs provisioning. Its guardian opens **Familie → Eine Familie einladen**, chooses whether one of their children should be connected, creates a link and passes it on; the invited person registers with their own address and the first child's name, and adds further children under **Weiteres Kind anlegen**. A second guardian for a child still needs `-add`. See [invited self-registration](invited-self-registration.md) for the limits, above all that guardianship is not checked.
 
 ## Test script
 
@@ -75,7 +75,7 @@ Note for each step: device, operating system and browser, what happened, and any
 5. The child adds the page to the home screen and opens it from there. *Is the child still signed in? After closing and reopening? After an hour? The next day?*
 
 ### B. Contact and first hello
-6. Family A creates an invitation code and passes it to family B (read aloud). Family B redeems it; family A confirms. Both children see each other under **Deine Crew**.
+6. Family A creates an invitation code and passes it to family B (read aloud). Family B redeems it; family A confirms. Both children see each other under **Deine Crew**. *If family B registered through an invitation that names a child and chose **Familie anlegen und Kinder verbinden**, the children are already connected: check that instead, and note whether both guardians understood what they agreed to.*
 7. Negative: before step 6 is complete, neither child sees the other.
 8. Both children write. Messages show **Gesendet** with a time and arrive on the other phone within a few seconds.
 9. One phone goes into flight mode, writes a message, and comes back. The message shows **Nicht gesendet** with **Nochmal senden**; after retrying it arrives exactly once.

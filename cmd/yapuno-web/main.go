@@ -22,6 +22,7 @@ import (
 	"github.com/pblumer/yapuno/internal/childweb"
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/devicepairing"
+	"github.com/pblumer/yapuno/internal/familydashboard"
 	"github.com/pblumer/yapuno/internal/familystore"
 	"github.com/pblumer/yapuno/internal/familyweb"
 	"github.com/pblumer/yapuno/internal/fontassets"
@@ -241,6 +242,32 @@ func (p purgingContacts) Remove(guardianID, tenantID, childID, linkID string) er
 	return nil
 }
 
+// invitedContacts connects the child an invitation names with the child of
+// the family that registered through it. The inviting guardian approved by
+// naming the child, the new guardian in the last step of the registration;
+// the contact store checks the current authority of both.
+type invitedContacts struct {
+	families interface {
+		Cards(guardianID, tenantID string) []familydashboard.ChildCard
+	}
+	contacts *contacts.Store
+}
+
+func (c invitedContacts) Inviting(guardianID, tenantID, childID string) (string, bool) {
+	for _, card := range c.families.Cards(guardianID, tenantID) {
+		if card.ID == childID && card.Permissions.ApproveContacts {
+			return card.DisplayName, true
+		}
+	}
+	return "", false
+}
+
+func (c invitedContacts) Connect(inviterGuardian, inviterTenant, inviterChild, guardianID, tenantID, childID string) error {
+	_, err := c.contacts.Connect(inviterGuardian, contacts.Party{TenantID: inviterTenant, ChildID: inviterChild},
+		guardianID, contacts.Party{TenantID: tenantID, ChildID: childID})
+	return err
+}
+
 func newApp(origin string, store *familystore.Store, directory *guardiandirectory.Directory, sender guardianlogin.Sender, sessions *guardiansession.Manager, opt optionalStores) (*app, error) {
 	if store == nil || directory == nil || sender == nil || sessions == nil {
 		return nil, errors.New("missing trusted Yapuno dependency")
@@ -335,14 +362,22 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 	mux.Handle("/family/security/", securityRoutes)
 	if opt.signup != nil {
 		// The lock-aware directory voids invitations of locked guardians.
-		join, err := signup.New(signup.Config{Origin: origin, Store: opt.signup, Directory: directory, Families: store, Mailer: registrationMailer, Sessions: sessions, Now: time.Now})
+		joinConfig := signup.Config{Origin: origin, Store: opt.signup, Directory: directory, Families: store, Mailer: registrationMailer, Sessions: sessions, Now: time.Now}
+		inviteOptions := familyweb.InviteOptions{Looks: looks}
+		if opt.contacts != nil {
+			// With contacts an invitation can also connect the children.
+			parentsChat := opt.guardianChat != nil
+			joinConfig.Connections, joinConfig.ParentsChat = invitedContacts{families: store, contacts: opt.contacts}, parentsChat
+			inviteOptions.Connect, inviteOptions.ParentsChat = true, parentsChat
+		}
+		join, err := signup.New(joinConfig)
 		if err != nil {
 			return nil, err
 		}
 		joinRoutes := join.Routes()
 		mux.Handle("/join", joinRoutes)
 		mux.Handle("/join/", joinRoutes)
-		inviteRoutes, err := familyweb.NewInvitePages(auth, opt.signup, store, origin, looks)
+		inviteRoutes, err := familyweb.NewInvitePages(auth, opt.signup, store, origin, inviteOptions)
 		if err != nil {
 			return nil, err
 		}
