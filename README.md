@@ -62,6 +62,7 @@ be in someone else's hands. A lock stops sign-in links, ends all sessions and
 notifies the other guardians of the same children; only the operator lifts it.
 See [the three steps and their limits](docs/planning/guardian-account-safety.md)
 and the [proposed ADR](docs/adr/draft-guardian-access-lock.md).
+**A guardian can stay signed in on a device:** with `YAPUNO_GUARDIAN_SESSIONS_FILE` the last step of the sign-in offers an unticked "30 Tage angemeldet bleiben". Such a session is stored as a digest in a private file, survives restarts and ends with sign-out, sign-out everywhere and the emergency lock; without the tick a session lasts 30 minutes as before. See [guardian sessions](docs/planning/guardian-sessions.md) and the [proposed ADR](docs/adr/draft-guardian-remembered-sessions.md).
 **A child's device is paired with a short code:** the device opens `/pair` and shows six digits, a signed-in guardian types them under "Geräte von …", and the device finishes by itself with a key that never leaves it. Nothing is scanned or compared. Real iPhone and Android tests are still open. See [device pairing](docs/planning/device-pairing.md) and the [proposed ADR](docs/adr/draft-device-pairing-by-code.md).
 
 ## Invited self-registration (preview, off by default)

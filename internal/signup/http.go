@@ -18,8 +18,7 @@ import (
 	"time"
 
 	"github.com/pblumer/yapuno/internal/familystore"
-	"github.com/pblumer/yapuno/internal/fontassets"
-	"github.com/pblumer/yapuno/internal/skin"
+	"github.com/pblumer/yapuno/internal/publicpage"
 )
 
 // Directory is the guardian identity directory. Has must answer true when it
@@ -109,14 +108,11 @@ func New(cfg Config) (*Handler, error) {
 		return nil, errors.New("invalid registration configuration")
 	}
 	// Nobody is signed in here, so these pages always use the classic skin.
-	def := skin.Catalog()["classic"]
-	decls, err := skin.Declarations(def)
+	css, err := publicpage.Styles()
 	if err != nil {
 		return nil, err
 	}
-	fonts := fontassets.FaceCSS(def.Typography.Heading, def.Typography.Body)
-	return &Handler{cfg: cfg, css: template.CSS(fonts + ".yp-page{" + decls + "}\n" + pageCSS),
-		pending: make(map[[32]byte]registration), recent: make(map[string]time.Time)}, nil
+	return &Handler{cfg: cfg, css: css, pending: make(map[[32]byte]registration), recent: make(map[string]time.Time)}, nil
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -128,32 +124,10 @@ func (h *Handler) Routes() http.Handler {
 	return mux
 }
 
-const pageCSS = `body{margin:0}
-.yp-page{box-sizing:border-box;min-height:100vh;background-color:var(--yp-bg);background-image:var(--yp-wallpaper);background-size:var(--yp-wallpaper-size);color:var(--yp-text);font-family:var(--yp-font-body);font-size:var(--yp-font-size);line-height:1.45}
-.yp-page *{box-sizing:border-box}
-.yp-shell{max-width:40rem;margin:0 auto;padding:1rem 1rem 2.5rem}
-.yp-page h1{font-family:var(--yp-font-heading);font-size:1.9rem;line-height:1.15;letter-spacing:-.03em;margin:.75rem 0 .5rem;overflow-wrap:anywhere}
-.yp-page h2{font-family:var(--yp-font-heading);font-size:1.2rem;margin:0 0 .6rem}
-.yp-muted{color:var(--yp-text-muted);margin:.3rem 0}
-.yp-page section{margin:1.25rem 0;padding:1rem;border:1px solid var(--yp-line);border-radius:var(--yp-radius);background:var(--yp-surface)}
-.yp-page ul{margin:0;padding-left:1.3rem;color:var(--yp-text-muted)}
-.yp-page li{margin:.4rem 0}
-.yp-page form{display:flex;flex-direction:column;gap:.6rem}
-.yp-page p+form{margin-top:.9rem}
-.yp-page label.yp-field{display:flex;flex-direction:column;gap:.3rem;font-weight:700}
-.yp-page input[type=email],.yp-page input[type=text]{width:100%;min-height:48px;padding:.6rem .8rem;border:2px solid var(--yp-text-muted);border-radius:var(--yp-radius);background:var(--yp-bg);color:var(--yp-text);font:inherit}
-.yp-check{display:flex;gap:.6rem;align-items:flex-start;min-height:44px;padding:.5rem 0}
-.yp-check input{width:1.4rem;height:1.4rem;flex:none;margin:0;accent-color:var(--yp-accent)}
-.yp-page button.yp-quiet{border:2px solid var(--yp-text-muted);background:var(--yp-surface);color:var(--yp-text)}
-.yp-page button{min-height:48px;padding:.7rem 1rem;border:0;border-radius:var(--yp-radius);background:var(--yp-accent);color:var(--yp-on-accent);font:inherit;font-weight:800;cursor:pointer}
-.yp-link{display:inline-flex;align-items:center;min-height:44px;color:var(--yp-accent-text);font-weight:700}
-.yp-page button:focus-visible,.yp-page input:focus-visible,.yp-link:focus-visible{outline:3px solid var(--yp-focus);outline-offset:2px}
-.yp-status{padding:.8rem 1rem;border:2px solid var(--yp-line);border-radius:var(--yp-radius);background:var(--yp-surface);font-weight:700}
-`
-
-const shellOpen = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Yapuno – {{.Title}}</title><style>{{.CSS}}</style></head><body><main class="yp-page" data-yp-skin="classic"><div class="yp-shell">`
-
-const shellClose = `<p class="yp-muted">Vorschau mit synthetischen Profilen.</p></div></main></body></html>`
+const (
+	shellOpen  = publicpage.Open
+	shellClose = publicpage.Close
+)
 
 var joinPage = template.Must(template.New("join").Parse(shellOpen + `
 <h1>Einladung zu Yapuno</h1>
@@ -194,14 +168,7 @@ var confirmPage = template.Must(template.New("confirm").Parse(shellOpen + `
 {{else}}<form method="post" action="/join/verify"><input type="hidden" name="token" value="{{.Token}}"><button type="submit">Jetzt Familie anlegen</button></form>{{end}}</section>
 ` + shellClose))
 
-func secureHeaders(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
-}
+func secureHeaders(w http.ResponseWriter) { publicpage.Headers(w) }
 
 func (h *Handler) message(w http.ResponseWriter, status int, title, text, detail string) {
 	w.WriteHeader(status)

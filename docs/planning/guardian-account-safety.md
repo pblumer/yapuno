@@ -27,7 +27,7 @@ The file is created empty with mode `0600` at start. Without it the page says th
 ## What each action does
 
 - **Abmelden** ends the session of this browser and removes its cookie.
-- **Überall abmelden** (ticked confirmation) ends every session of this guardian in this process and invalidates sign-in links that were sent but not used. It is not a lock: a new link can be requested.
+- **Überall abmelden** (ticked confirmation) ends every session of this guardian, including those of devices on which the guardian [stays signed in](guardian-sessions.md#staying-signed-in-on-a-device-optional), and invalidates sign-in links that were sent but not used. It is not a lock: a new link can be requested.
 - **Meinen Zugang sperren** (ticked confirmation):
   1. optionally locks every device of the guardian's children first ([what a device lock does](device-lost.md)); a finder with a guardian session could have paired a device of their own;
   2. stores the lock durably;

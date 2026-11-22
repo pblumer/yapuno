@@ -59,14 +59,16 @@ var homePage = template.Must(template.New("home").Parse(`<!doctype html><html la
 </div></main></body></html>`))
 
 // homeNotices and homeAlerts are the only texts a redirect can select. They
-// tell a guardian who has just registered what became of the connection
-// they agreed to.
+// tell a guardian who has just registered or signed in what became of
+// something they asked for.
 var (
 	homeNotices = map[string]string{
 		"connected": "Deine Familie ist angelegt und die Kinder sind verbunden. Verbinde als Nächstes das Gerät deines Kindes.",
 	}
 	homeAlerts = map[string]string{
 		"unconnected": "Deine Familie ist angelegt, aber die Kinder wurden nicht verbunden. Verbindet sie unter «Kontakte» mit einem Code.",
+		// The guardian asked to stay signed in, and the session could not be stored.
+		"not-remembered": "Du bist angemeldet, aber nur für kurze Zeit: Die Anmeldung konnte auf diesem Gerät nicht gespeichert werden.",
 	}
 )
 
