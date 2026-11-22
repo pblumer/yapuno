@@ -14,13 +14,16 @@ import (
 	"time"
 
 	"github.com/pblumer/yapuno/internal/authz"
+	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/devicepairing"
 	"github.com/pblumer/yapuno/internal/devicepairing/pairingtest"
 	"github.com/pblumer/yapuno/internal/familydashboard"
 	"github.com/pblumer/yapuno/internal/familystore"
+	"github.com/pblumer/yapuno/internal/guardianchat"
 	"github.com/pblumer/yapuno/internal/guardiandirectory"
 	"github.com/pblumer/yapuno/internal/guardianlock"
 	"github.com/pblumer/yapuno/internal/guardiansession"
+	"github.com/pblumer/yapuno/internal/messages"
 	"github.com/pblumer/yapuno/internal/signup"
 )
 
@@ -124,6 +127,12 @@ type securityServer struct {
 	lockPath  string
 	// signupPath switches invited self-registration on when it is set.
 	signupPath string
+	// chatPath switches the guardians' chat on when it is set; contacts and
+	// the children's chat then run as well.
+	chatPath     string
+	contacts     *contacts.Store
+	messages     *messages.Store
+	guardianChat *guardianchat.Store
 }
 
 const threeGuardians = `{"guardians":[{"email":"anna@example.org","guardian_id":"guardian-a","tenant_id":"tenant-a","active":true},{"email":"ben@example.org","guardian_id":"guardian-a2","tenant_id":"tenant-a","active":true},{"email":"bea-parent@example.org","guardian_id":"guardian-b","tenant_id":"tenant-b","active":true}]}`
@@ -181,6 +190,27 @@ func (s *securityServer) start(withLocks bool) {
 			s.t.Fatal(err)
 		}
 		opt.signup = invitations
+	}
+	if s.chatPath != "" {
+		var err error
+		if s.contacts == nil {
+			if s.contacts, err = contacts.Open(filepath.Join(s.root, "contacts.json"), s.families, time.Now); err != nil {
+				s.t.Fatal(err)
+			}
+			if s.messages, err = messages.Open(filepath.Join(s.root, "messages.log"), s.contacts, s.pairing, s.families, time.Now); err != nil {
+				s.t.Fatal(err)
+			}
+			s.t.Cleanup(func() { _ = s.messages.Close() })
+		}
+		if s.guardianChat != nil {
+			_ = s.guardianChat.Close()
+		}
+		if s.guardianChat, err = guardianchat.Open(s.chatPath, s.families, s.contacts, s.guardians, s.pairing, time.Now); err != nil {
+			s.t.Fatal(err)
+		}
+		chat := s.guardianChat
+		s.t.Cleanup(func() { _ = chat.Close() })
+		opt.contacts, opt.messages, opt.guardianChat = s.contacts, s.messages, s.guardianChat
 	}
 	handler, err := newHandler("https://app.example.org", s.families, s.guardians, s.mailer, s.sessions, opt)
 	if err != nil {

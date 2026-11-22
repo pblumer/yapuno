@@ -20,7 +20,7 @@ The first family still comes from [offline provisioning](trial-run.md#provisioni
 2. The guardian passes the link to another adult they know personally.
 3. That person opens the link (`/join?code=…`), enters an e-mail address and the first child's name, and confirms being the child's guardian.
 4. Yapuno sends a confirmation link (valid 10 minutes, single use). Opening it shows a page with one button; pressing it creates the family and signs the guardian in.
-5. The new guardian connects a device under **Geräte verwalten**, adds further children under **Weiteres Kind anlegen** (`/family/children`) and can invite families as well.
+5. The new guardian connects a device under **Geräte von …**, adds further children under **Weiteres Kind anlegen** (`/family/children`) and can invite families as well.
 
 From then on the guardian signs in at `/login` like every other guardian.
 

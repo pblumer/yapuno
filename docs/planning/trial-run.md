@@ -29,6 +29,7 @@ All state lives in one private directory (mode `0700`). The two required files a
 | `YAPUNO_APPEARANCE_FILE` | "Mein Look" (themes and figures) | |
 | `YAPUNO_REPORTS_FILE` | reporting, e-mail notice, reminders | messages |
 | `YAPUNO_GUARDIAN_LOCKS_FILE` | emergency lock of a guardian's access | |
+| `YAPUNO_GUARDIAN_CHAT_FILE` | guardians chat with their own children and with guardians of connected families ([details](guardian-chat.md)) | |
 | `YAPUNO_SIGNUP_FILE` | optional: families register through an invitation and create child profiles ([details](invited-self-registration.md)); guardianship is then self-declared | |
 
 For the trial set all of them. `YAPUNO_SIGNUP_FILE` is the exception: set it only if further families should register themselves instead of being provisioned.
@@ -70,7 +71,7 @@ Note for each step: device, operating system and browser, what happened, and any
 1. Each guardian requests a sign-in link, receives it and signs in. *Note how long the e-mail took and whether it landed in spam.*
 2. Each guardian sees only their own child on **Familie**.
 3. Each guardian chooses a theme and figure under **Mein Look**.
-4. Each guardian opens **Geräte verwalten**, creates a pairing code, and the child's phone scans the QR code with its normal camera. The fingerprints match, the guardian approves, the child lands on **Hoi …!**.
+4. Each guardian opens **Geräte von …** on the child's card, creates a pairing code, and the child's phone scans the QR code with its normal camera. The fingerprints match, the guardian approves, the child lands on **Hoi …!**.
 5. The child adds the page to the home screen and opens it from there. *Is the child still signed in? After closing and reopening? After an hour? The next day?*
 
 ### B. Contact and first hello
@@ -80,6 +81,11 @@ Note for each step: device, operating system and browser, what happened, and any
 9. One phone goes into flight mode, writes a message, and comes back. The message shows **Nicht gesendet** with **Nochmal senden**; after retrying it arrives exactly once.
 10. Lock the phone for a few minutes, then open the chat again. *Do new messages appear? Is a new sign-in needed?*
 11. Each child changes theme and figure; the other child sees the new figure, not the theme.
+
+### B2. Guardians write too
+11a. A guardian opens **Mit … schreiben** on the child's card and writes. The child finds the message under **Deine Eltern** and answers; the answer appears on the guardian's page without reloading.
+11b. Each guardian opens **Chats** and finds the other family as **Elternteil von …**. Both write; messages arrive without reloading.
+11c. Negative: under **Chats** a guardian finds no conversation between the children, and a child finds no conversation between the guardians.
 
 ### C. Something goes wrong
 12. A child opens **Melden**, reports one message and reads the text on the page. *Ask the child afterwards what they think the parents can now see.*

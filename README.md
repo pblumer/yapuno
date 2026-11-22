@@ -75,6 +75,17 @@ switch is for trials with synthetic profiles only. See
 [the flow and its limits](docs/planning/invited-self-registration.md) and the
 [proposed ADR](docs/adr/draft-invited-self-registration.md).
 
+## Guardian chat and family overview (preview)
+
+With `YAPUNO_GUARDIAN_CHAT_FILE`, a guardian writes with their own children
+and with the guardians of families whose children are connected to theirs;
+children find their guardians under "Deine Eltern". Each request is authorized
+from current grants, contacts, locks and devices. No adult reaches a child of
+another family, and **guardians cannot read what children write to each
+other**. The family page is now a real start page with every function and a
+guide to the first chat. See [who talks to whom and the limits](docs/planning/guardian-chat.md)
+and the [proposed ADR](docs/adr/draft-guardian-chat.md).
+
 ## Messaging (preview)
 
 With `YAPUNO_MESSAGES_FILE` (plus pairing and contacts), two children whose

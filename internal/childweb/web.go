@@ -20,6 +20,7 @@ import (
 
 	"github.com/pblumer/yapuno/internal/appearance"
 	"github.com/pblumer/yapuno/internal/authz"
+	"github.com/pblumer/yapuno/internal/chatpage"
 	"github.com/pblumer/yapuno/internal/childsession"
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/fontassets"
@@ -78,6 +79,23 @@ type Options struct {
 	// ReportNotices says that guardians are e-mailed about a new report, so
 	// the child is told. It requires Reports.
 	ReportNotices bool
+	// Family lists the child's conversations with its own guardians. Their
+	// messages go through Messages like every other conversation.
+	Family FamilyChats
+}
+
+// FamilyThread is the conversation of the authenticated child with one of
+// its own guardians. Name is how the guardian is shown to the child.
+type FamilyThread struct {
+	ID       string
+	Name     string
+	Guardian appearance.Subject
+}
+
+// FamilyChats must compute the list from current state for exactly the
+// child and device of the session: grants, guardian status, device approval.
+type FamilyChats interface {
+	FamilyThreads(s childsession.Session) []FamilyThread
 }
 
 type handler struct {
@@ -91,8 +109,11 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 	if sessions == nil || children == nil {
 		return nil, errors.New("child sessions and child directory are required")
 	}
-	if opt.Messages != nil && opt.Contacts == nil {
+	if opt.Messages != nil && opt.Contacts == nil && opt.Family == nil {
 		return nil, errors.New("messaging requires the contact store")
+	}
+	if opt.Family != nil && opt.Messages == nil {
+		return nil, errors.New("family conversations require messaging")
 	}
 	if opt.Reports != nil && opt.Messages == nil {
 		return nil, errors.New("reporting requires messaging")
@@ -113,12 +134,15 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 		mux.HandleFunc("POST /child/look", h.lookSave)
 	}
 	if opt.Messages != nil {
-		mux.HandleFunc("GET /child/chat.js", h.asset(chatJS))
-		mux.HandleFunc("GET /child/chat-utils.js", h.asset(chatUtilsJS))
+		mux.HandleFunc("GET /child/chat.js", h.asset(chatpage.JS))
+		mux.HandleFunc("GET /child/chat-utils.js", h.asset(chatpage.UtilsJS))
 		mux.HandleFunc("GET /child/chat/{id}", h.chat)
 		mux.HandleFunc("POST /child/chat/{id}/send", h.sendForm)
 		mux.HandleFunc("GET /child/chat/{id}/messages", h.historyJSON)
 		mux.HandleFunc("POST /child/chat/{id}/messages", h.sendJSON)
+	}
+	// Blocking and reporting exist for contacts between children only.
+	if opt.Messages != nil && opt.Contacts != nil {
 		mux.HandleFunc("GET /child/chat/{id}/safety", h.safety)
 		mux.HandleFunc("POST /child/chat/{id}/block", h.block)
 		if opt.Reports != nil {
@@ -298,6 +322,7 @@ var homePage = template.Must(template.New("child-home").Parse(`<!doctype html><h
 <header class="yp-top"><div class="yp-logo">ya<span>puno</span></div>{{if .LookHref}}<a class="yp-me" href="{{.LookHref}}" aria-label="Mein Look">{{.Figure}}</a>{{else}}{{.Figure}}{{end}}</header>
 <h1>Hoi {{.Name}}!</h1>
 {{if .Notice}}<p class="yp-status" role="status">{{.Notice}}</p>{{end}}<p class="yp-muted">Schön, dass du da bist.</p>
+{{if .Parents}}<h2>Deine Eltern</h2><ul class="yp-crew">{{range .Parents}}<li><a href="/child/chat/{{.Chat}}">{{template "face" .}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}</ul><p class="yp-muted">Was ihr hier schreibt, sehen nur du und dieser Elternteil.</p>{{end}}
 <h2>Deine Crew</h2>
 {{if .Crew}}<ul class="yp-crew">{{range .Crew}}<li>{{if .Chat}}<a href="/child/chat/{{.Chat}}">{{template "face" .}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a>{{else}}{{template "face" .}}<span>{{.Name}}</span>{{end}}</li>{{end}}</ul>{{else}}<p class="yp-empty">Noch niemand in deiner Crew. Deine Eltern können dich mit anderen Kindern verbinden.</p>{{end}}
 <p class="yp-muted">In deiner Crew sind nur Kinder, denen beide Familien zugestimmt haben. Fremde können dich nicht finden.</p>
@@ -368,14 +393,40 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 		CSS              template.CSS
 		Figure           template.HTML
 		Crew, Blocked    []crewMember
+		Parents          []crewMember
 		Chats            bool
 		LookHref         string
 	}{
 		Skin: def.ID, Name: name, CSRF: s.CSRFToken, Notice: fixedNotice(r, homeNotices), Blocked: blocked,
 		// Validated first-party skin tokens and fixed component rules only.
 		CSS:    template.CSS(fontassets.FaceCSS(def.Typography.Heading, def.Typography.Body) + ".yp-child{" + decls + "}\n" + homeCSS),
-		Figure: figure, Crew: crew, Chats: h.opt.Messages != nil, LookHref: lookHref,
+		Figure: figure, Crew: crew, Parents: h.parents(s), Chats: h.opt.Messages != nil, LookHref: lookHref,
 	})
+}
+
+// parents lists the child's conversations with its own guardians.
+func (h *handler) parents(s childsession.Session) []crewMember {
+	if h.opt.Family == nil {
+		return nil
+	}
+	var out []crewMember
+	for _, t := range h.opt.Family.FamilyThreads(s) {
+		out = append(out, crewMember{Name: t.Name, Initial: initialOf(t.Name), Chat: t.ID, Figure: h.guardianFigure(t.Guardian)})
+	}
+	return out
+}
+
+// guardianFigure returns the figure a guardian chose. Only the figure is
+// shown to the child, never the guardian's theme or identifiers.
+func (h *handler) guardianFigure(subject appearance.Subject) template.HTML {
+	if h.opt.Looks == nil || subject.Kind != appearance.KindGuardian {
+		return ""
+	}
+	figure, err := appearance.FigureSVG(h.opt.Looks.Get(subject).Figure, 44)
+	if err != nil {
+		return ""
+	}
+	return figure
 }
 
 func initialOf(name string) string {

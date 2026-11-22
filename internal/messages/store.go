@@ -245,6 +245,12 @@ func (s *Store) conv(id string) *conversation {
 // UTF-8, control characters other than newline and tab, and bidirectional
 // override characters that can disguise what a message says.
 func normalize(body string) (string, bool) {
+	return Normalize(body)
+}
+
+// Normalize is the one rule for message text in every kind of conversation;
+// see normalize.
+func Normalize(body string) (string, bool) {
 	if len(body) > 2*MaxBodyBytes || !utf8.ValidString(body) {
 		return "", false
 	}

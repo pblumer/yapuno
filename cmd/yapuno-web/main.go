@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/pblumer/yapuno/internal/familystore"
 	"github.com/pblumer/yapuno/internal/familyweb"
 	"github.com/pblumer/yapuno/internal/fontassets"
+	"github.com/pblumer/yapuno/internal/guardianchat"
 	"github.com/pblumer/yapuno/internal/guardiandirectory"
 	"github.com/pblumer/yapuno/internal/guardianlock"
 	"github.com/pblumer/yapuno/internal/guardianlogin"
@@ -34,6 +36,10 @@ import (
 	"github.com/pblumer/yapuno/internal/reports"
 	"github.com/pblumer/yapuno/internal/signup"
 )
+
+// version is set at build time (-ldflags "-X main.version=..."). It is shown
+// on the family overview so an operator can tell which build is running.
+var version = ""
 
 // reminderInterval is how often unseen reports are checked for a due reminder.
 const reminderInterval = 5 * time.Minute
@@ -70,8 +76,107 @@ type optionalStores struct {
 	// families, who register themselves and create their own child profiles.
 	// Guardianship is then self-declared; see docs/adr/draft-invited-self-registration.md.
 	signup *signup.Store
+	// guardianChat lets guardians chat with their own children and with
+	// guardians of families whose children are connected to theirs.
+	guardianChat *guardianchat.Store
 	// now is the clock for report notices and reminders; nil means time.Now.
 	now func() time.Time
+}
+
+// inactive names, in German, what this installation does not offer. The
+// family overview shows the list.
+func (o optionalStores) inactive() []string {
+	var out []string
+	for _, f := range []struct {
+		off  bool
+		name string
+	}{
+		{o.pairing == nil, "Geräte verbinden"},
+		{o.contacts == nil, "Kontakte zwischen Familien"},
+		{o.messages == nil, "Chat der Kinder"},
+		{o.guardianChat == nil, "Chat für Eltern"},
+		{o.reports == nil, "Melden"},
+		{o.appearance == nil, "Mein Look"},
+		{o.guardianLocks == nil, "Notfallsperre"},
+		{o.signup == nil, "Registrierung per Einladung"},
+	} {
+		if f.off {
+			out = append(out, f.name)
+		}
+	}
+	return out
+}
+
+// noConnections and noDevices stand in for the contact and pairing stores
+// when those are not configured: nobody is connected, no device is approved.
+type noConnections struct{}
+
+func (noConnections) Connections(contacts.Party) []contacts.Connection { return nil }
+
+type noDevices struct{}
+
+func (noDevices) ActiveDevice(string, string, string) (devicepairing.Device, bool) {
+	return devicepairing.Device{}, false
+}
+
+// childThreads shows a child its conversations with its own guardians.
+// Guardians have no display names yet, so they are numbered in a stable order.
+type childThreads struct{ side guardianchat.ChildSide }
+
+func childPrincipal(s childsession.Session) messages.Principal {
+	return messages.Principal{Party: contacts.Party{TenantID: s.TenantID, ChildID: s.ChildID}, DeviceID: s.DeviceID}
+}
+
+func (c childThreads) FamilyThreads(s childsession.Session) []childweb.FamilyThread {
+	threads := c.side.Threads(childPrincipal(s))
+	out := make([]childweb.FamilyThread, 0, len(threads))
+	for i, t := range threads {
+		name := "Dein Elternteil"
+		if len(threads) > 1 {
+			name = "Elternteil " + strconv.Itoa(i+1)
+		}
+		out = append(out, childweb.FamilyThread{ID: t.ID, Name: name,
+			Guardian: appearance.Subject{Kind: appearance.KindGuardian, TenantID: t.Peer.TenantID, ID: t.Peer.ID}})
+	}
+	return out
+}
+
+// routedMessages sends each request of the child pages to the store that
+// owns the conversation: the chat with a guardian, or the chat between
+// children. Each store authorizes the request itself.
+type routedMessages struct {
+	family   guardianchat.ChildSide
+	children childweb.Messages // nil when the children's chat is off
+}
+
+func (r routedMessages) Send(p messages.Principal, id, clientID, body string) (messages.Message, bool, error) {
+	if r.family.Has(p, id) {
+		return r.family.Send(p, id, clientID, body)
+	}
+	if r.children == nil {
+		return messages.Message{}, false, messages.ErrForbidden
+	}
+	return r.children.Send(p, id, clientID, body)
+}
+
+func (r routedMessages) History(p messages.Principal, id string, after uint64, limit int) ([]messages.Message, error) {
+	if r.family.Has(p, id) {
+		return r.family.History(p, id, after, limit)
+	}
+	if r.children == nil {
+		return nil, messages.ErrForbidden
+	}
+	return r.children.History(p, id, after, limit)
+}
+
+func (r routedMessages) Recent(p messages.Principal, id string, limit int) ([]messages.Message, error) {
+	if r.family.Has(p, id) {
+		return r.family.Recent(p, id, limit)
+	}
+	if r.children == nil {
+		return nil, messages.ErrForbidden
+	}
+	return r.children.Recent(p, id, limit)
 }
 
 // app is the HTTP handler plus the background work that belongs to it.
@@ -114,15 +219,24 @@ func newHandler(origin string, store *familystore.Store, directory *guardiandire
 // a failed purge is retried by the next compaction.
 type purgingContacts struct {
 	*contacts.Store
-	messages *messages.Store
+	messages *messages.Store     // nil when the children's chat is off
+	guardian *guardianchat.Store // nil when the guardians' chat is off
 }
 
 func (p purgingContacts) Remove(guardianID, tenantID, childID, linkID string) error {
 	if err := p.Store.Remove(guardianID, tenantID, childID, linkID); err != nil {
 		return err
 	}
-	if err := p.messages.Compact(); err != nil {
-		log.Printf("message purge after contact removal failed; it will be retried at the next compaction")
+	if p.messages != nil {
+		if err := p.messages.Compact(); err != nil {
+			log.Printf("message purge after contact removal failed; it will be retried at the next compaction")
+		}
+	}
+	// The conversation of the two families' guardians ends with the contact.
+	if p.guardian != nil {
+		if err := p.guardian.Compact(); err != nil {
+			log.Printf("guardian chat purge after contact removal failed; it will be retried at the next compaction")
+		}
 	}
 	return nil
 }
@@ -163,7 +277,14 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		return nil, err
 	}
 	auth := verifiedSessions{sessions: sessions, directory: directory}
-	familyOptions := familyweb.Options{DevicePages: opt.pairing != nil, ContactPages: opt.contacts != nil, SecurityPages: true}
+	familyOptions := familyweb.Options{DevicePages: opt.pairing != nil, ContactPages: opt.contacts != nil, SecurityPages: true, Inactive: opt.inactive(), Version: version}
+	if opt.guardianChat != nil {
+		// From here on the chat asks the directory that knows the locks.
+		if err := opt.guardianChat.SetGuardians(directory); err != nil {
+			return nil, err
+		}
+		familyOptions.Chat = opt.guardianChat
+	}
 	// Assign only a non-nil store: a typed nil pointer would be a non-nil interface.
 	var looks familyweb.AppearanceStore
 	if opt.appearance != nil {
@@ -228,6 +349,15 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		mux.Handle("/family/invite", inviteRoutes)
 		mux.Handle("/family/invite/", inviteRoutes)
 	}
+	if opt.guardianChat != nil {
+		chatRoutes, err := familyweb.NewChatPages(auth, opt.guardianChat, store, looks)
+		if err != nil {
+			return nil, err
+		}
+		for _, pattern := range []string{"/family/chat", "/family/chat/", "/family/chat.js", "/family/chat-utils.js"} {
+			mux.Handle(pattern, chatRoutes)
+		}
+	}
 	if opt.appearance != nil {
 		lookRoutes, err := familyweb.NewLookPages(auth, opt.appearance)
 		if err != nil {
@@ -237,8 +367,8 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 	}
 	if opt.contacts != nil {
 		var contactStore familyweb.ContactStore = opt.contacts
-		if opt.messages != nil {
-			contactStore = purgingContacts{Store: opt.contacts, messages: opt.messages}
+		if opt.messages != nil || opt.guardianChat != nil {
+			contactStore = purgingContacts{Store: opt.contacts, messages: opt.messages, guardian: opt.guardianChat}
 		}
 		var contactRoutes http.Handler
 		if opt.reports != nil {
@@ -307,6 +437,11 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 				}
 			}
 		}
+		if opt.guardianChat != nil {
+			side := opt.guardianChat.ForChildren()
+			childOptions.Family = childThreads{side: side}
+			childOptions.Messages = routedMessages{family: side, children: childOptions.Messages}
+		}
 		childPages, err := childweb.New(childSessions, store, childOptions)
 		if err != nil {
 			return nil, err
@@ -336,6 +471,7 @@ func main() {
 	messagesPath := flag.String("messages", os.Getenv("YAPUNO_MESSAGES_FILE"), "optional private message log; requires pairing and contacts")
 	reportsPath := flag.String("reports", os.Getenv("YAPUNO_REPORTS_FILE"), "optional private file for messages children report to their guardians; requires messages")
 	guardianLocksPath := flag.String("guardian-locks", os.Getenv("YAPUNO_GUARDIAN_LOCKS_FILE"), "optional private file for emergency locks of guardian access")
+	guardianChatPath := flag.String("guardian-chat", os.Getenv("YAPUNO_GUARDIAN_CHAT_FILE"), "optional private log for chats of guardians with their own children and with guardians of connected families")
 	signupPath := flag.String("signup", os.Getenv("YAPUNO_SIGNUP_FILE"), "optional private invitation file; switches invited self-registration on (guardianship is then self-declared)")
 	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
 	flag.Parse()
@@ -403,6 +539,22 @@ func main() {
 			log.Fatal("guardian lock store unavailable or insecure")
 		}
 	}
+	var guardianChatStore *guardianchat.Store
+	if *guardianChatPath != "" {
+		var connections guardianchat.Contacts = noConnections{}
+		if contactStore != nil {
+			connections = contactStore
+		}
+		var approved guardianchat.Devices = noDevices{}
+		if pairingStore != nil {
+			approved = pairingStore
+		}
+		guardianChatStore, err = guardianchat.Open(*guardianChatPath, store, connections, directory, approved, time.Now)
+		if err != nil {
+			log.Fatal("guardian chat log unavailable, insecure or corrupt")
+		}
+		defer guardianChatStore.Close()
+	}
 	var signupStore *signup.Store
 	if *signupPath != "" {
 		signupStore, err = signup.Open(*signupPath, time.Now)
@@ -424,7 +576,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore})
+	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore, guardianChat: guardianChatStore})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}
