@@ -37,7 +37,7 @@ Chosen option (if approved): **option 2**, keeping WebAuthn as a later evaluatio
 
 The login domain string differs from the pairing domains and the signed message covers the device id, so pairing signatures and challenges for other devices cannot be replayed.
 
-Both JSON endpoints require the exact HTTPS `Origin`, JSON content type, a 4 KiB body, no unknown fields and no trailing data. The authenticated home page carries no script (`default-src 'none'` without `script-src`).
+Both JSON endpoints require a request from a page of the same HTTPS origin (the exact `Origin`, or `Sec-Fetch-Site: same-origin` where a browser sends `Origin: null`; see `internal/sameorigin`), JSON content type, a 4 KiB body, no unknown fields and no trailing data. The authenticated home page carries no script (`default-src 'none'` without `script-src`).
 
 ### What this does and does not guarantee
 - A copied session cookie works for at most 12 hours and cannot be renewed without the device key.

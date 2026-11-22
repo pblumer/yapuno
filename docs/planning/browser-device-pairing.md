@@ -59,8 +59,13 @@ Child API (`internal/pairingweb`):
   SHA-256(`yapuno-pair-finish-v1\\0` + nonce); returns a device ID.
 
 Child requests use JSON bodies (never token-bearing GET URLs), have 4 KiB
-request limits, require the canonical HTTPS request Origin and receive no CORS
-permission. HTTP responses are no-store and no-referrer. JS fetches omit
+request limits, must come from a page of the same HTTPS origin and receive no
+CORS permission. "Same origin" is decided by `internal/sameorigin`: the
+`Origin` header names exactly this origin, or, where a browser sends
+`Origin: null`, `Sec-Fetch-Site` says `same-origin`. WebKit (every browser on
+an iPhone) and Firefox send `Origin: null` for a request in same-origin mode
+from a no-referrer page, which is why the scripts post in the default mode. A
+`Sec-Fetch-Site` other than `same-origin` is always refused. HTTP responses are no-store and no-referrer. JS fetches omit
 cookies. The token does **not** authenticate a child for chat or other APIs.
 
 ## Required before a real pilot

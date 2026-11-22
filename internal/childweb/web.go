@@ -24,6 +24,7 @@ import (
 	"github.com/pblumer/yapuno/internal/childsession"
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/fontassets"
+	"github.com/pblumer/yapuno/internal/sameorigin"
 	"github.com/pblumer/yapuno/internal/skin"
 )
 
@@ -183,7 +184,7 @@ type sessionRequest struct {
 // readJSON accepts only same-origin HTTPS JSON requests with a small body,
 // no unknown fields and no trailing data.
 func readJSON(w http.ResponseWriter, r *http.Request) (sessionRequest, bool) {
-	if r.Header.Get("Origin") != "https://"+r.Host {
+	if !sameorigin.Request(r) {
 		http.Error(w, "Same-origin HTTPS required", http.StatusForbidden)
 		return sessionRequest{}, false
 	}

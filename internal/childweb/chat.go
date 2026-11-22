@@ -16,6 +16,7 @@ import (
 	"github.com/pblumer/yapuno/internal/childsession"
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/messages"
+	"github.com/pblumer/yapuno/internal/sameorigin"
 )
 
 // Messages stores and returns messages. It must authorize every call from
@@ -200,7 +201,7 @@ func (h *handler) sendJSON(w http.ResponseWriter, r *http.Request) {
 		chatpage.JSONError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	if r.Header.Get("Origin") != "https://"+r.Host {
+	if !sameorigin.Request(r) {
 		chatpage.JSONError(w, http.StatusForbidden, "origin")
 		return
 	}

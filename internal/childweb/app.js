@@ -48,8 +48,12 @@
     }
   }
   async function post(path, payload) {
+    // No "mode: same-origin" here: with it, and the page's Referrer-Policy
+    // no-referrer, the Fetch standard makes Safari and Firefox send
+    // "Origin: null". The URL is a fixed same-origin path and redirects are
+    // refused, so the request cannot leave this origin either way.
     return fetch(path, {
-      method: "POST", mode: "same-origin", credentials: "same-origin",
+      method: "POST", credentials: "same-origin",
       cache: "no-store", redirect: "error",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload)

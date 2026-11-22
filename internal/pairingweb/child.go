@@ -13,6 +13,7 @@ import (
 	"net/http"
 
 	"github.com/pblumer/yapuno/internal/devicepairing"
+	"github.com/pblumer/yapuno/internal/sameorigin"
 )
 
 //go:embed pair.html
@@ -109,7 +110,7 @@ type request struct {
 func readRequest(w http.ResponseWriter, r *http.Request) (request, bool) {
 	// This is an unauthenticated, token-bound API. No cross-origin calls,
 	// even simple cross-site form posts, may reach the backend.
-	if r.Header.Get("Origin") != "https://"+r.Host {
+	if !sameorigin.Request(r) {
 		http.Error(w, "Same-origin HTTPS required", http.StatusForbidden)
 		return request{}, false
 	}
