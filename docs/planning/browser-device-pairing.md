@@ -11,7 +11,7 @@ this with real children's data.
 ## What works in the preview
 
 1. A verified guardian logs into the existing HTTPS Yapuno web preview, opens
-   **Familie → Geräte verwalten**, and chooses **Pairing-Code erzeugen**.
+   **Familie → Geräte von …**, and chooses **Pairing-Code erzeugen**.
 2. The page shows a locally generated **QR code**, copy/share buttons and a
    unique, five-minute invitation URL of the form
    `https://configured-yapuno-host/pair#<one-time-token>`. No third-party QR

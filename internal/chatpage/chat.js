@@ -15,7 +15,10 @@
 
   const conversation = root.dataset.conversation;
   const csrf = root.dataset.csrf;
-  const base = "/child/chat/" + conversation + "/messages";
+  // The page says where its messages live and where "home" is, so the same
+  // script serves the child area and the guardian area.
+  const base = root.dataset.base || "/child/chat/" + conversation + "/messages";
+  const home = root.dataset.home || "/child";
   const draftKey = "yapuno-draft-" + conversation;
   const pendingKey = "yapuno-pending-" + conversation;
   const known = new Set();
@@ -116,7 +119,7 @@
     }
     if (result === "reauth") {
       // The message stays remembered and is offered again after sign-in.
-      location.replace("/child");
+      location.replace(home);
       return;
     }
     if (result === "ended") {
@@ -169,7 +172,7 @@
           if (failures > 0) say("");
           failures = 0;
         } else if (response.status === 401) {
-          location.replace("/child");
+          location.replace(home);
           return;
         } else if (response.status === 403) {
           endConversation();

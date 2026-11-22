@@ -594,6 +594,40 @@ func (s *Store) Grant(id string, self Party) (Party, authz.ContactGrant, bool) {
 	return l.other(self), l.grant(), true
 }
 
+// Connection is one established contact of a child, seen from that child.
+type Connection struct {
+	Peer  Party
+	Grant authz.ContactGrant
+}
+
+// Connections lists the established contacts of one child: approved by both
+// families and not ended. Unlike ContactsOf it includes contacts a child has
+// blocked, marked in the grant, because a block pauses the children's chat
+// without ending the connection between the families. Requests that are not
+// confirmed yet are not connections. It is not an authorization check:
+// callers decide from the grants what the connection allows.
+func (s *Store) Connections(p Party) []Connection {
+	if !p.valid() {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.exists(p) {
+		return nil
+	}
+	var out []Connection
+	for _, l := range s.state.Links {
+		if !l.Active || !l.involves(p) || !s.exists(l.other(p)) {
+			continue
+		}
+		out = append(out, Connection{Peer: l.other(p), Grant: l.grant()})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Peer.TenantID+"\x00"+out[i].Peer.ChildID < out[j].Peer.TenantID+"\x00"+out[j].Peer.ChildID
+	})
+	return out
+}
+
 // Allowed reports whether two children are mutually approved contacts right
 // now. It authorizes the relationship only: device approval, sender status
 // and per-operation checks remain separate (see authz.CanContact).

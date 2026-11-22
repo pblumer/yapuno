@@ -28,7 +28,7 @@ var childPage = template.Must(template.New("child").Parse(`<!doctype html><html 
 {{else}}<p class="yp-muted">In einer Familie sind höchstens {{.Max}} Kinder möglich.</p>{{end}}</section>
 <section aria-labelledby="yp-know"><h2 id="yp-know">Gut zu wissen</h2><ul class="yp-facts">
 <li>Das Profil gehört zu deiner Familie. Den Namen kannst du später ändern.</li>
-<li>Danach verbindest du in der Familienübersicht unter «Geräte verwalten» ein Gerät für das Kind.</li>
+<li>Danach verbindest du in der Familienübersicht unter «Geräte von …» ein Gerät für das Kind.</li>
 <li>Du verwaltest das neue Profil allein. Einen zweiten Elternteil fügt zurzeit nur der Betreiber dieser Yapuno-Installation hinzu.</li>
 <li>In einer Familie sind höchstens {{.Max}} Kinder möglich.</li>
 </ul></section>

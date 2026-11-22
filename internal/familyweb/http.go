@@ -5,13 +5,11 @@ package familyweb
 import (
 	"crypto/subtle"
 	"errors"
-	"html/template"
 	"mime"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/pblumer/yapuno/internal/appearance"
 	"github.com/pblumer/yapuno/internal/familydashboard"
 	"github.com/pblumer/yapuno/internal/familystore"
 )
@@ -64,6 +62,14 @@ type Options struct {
 	Children ChildCreator
 	// InvitePages links to "invite a family" (NewInvitePages).
 	InvitePages bool
+	// Chat links to the guardian's chats (NewChatPages); nil means none.
+	Chat GuardianChat
+	// Inactive names, in German, the functions this installation does not
+	// offer. The overview shows them so a guardian knows why a step of the
+	// guide is missing; it is information for the operator, not a secret.
+	Inactive []string
+	// Version is shown on the overview when set.
+	Version string
 }
 
 // NewWithOptions builds the fail-closed family overview handler.
@@ -71,7 +77,7 @@ func NewWithOptions(auth Authenticator, store FamilyStore, opt Options) (http.Ha
 	if auth == nil || store == nil {
 		return nil, errors.New("authenticator and store are required")
 	}
-	h := &handler{auth: auth, store: store, looks: opt.Looks, devicesEnabled: opt.DevicePages, contactsEnabled: opt.ContactPages, securityEnabled: opt.SecurityPages, reports: opt.Reports, children: opt.Children, inviteEnabled: opt.InvitePages}
+	h := &handler{auth: auth, store: store, looks: opt.Looks, devicesEnabled: opt.DevicePages, contactsEnabled: opt.ContactPages, securityEnabled: opt.SecurityPages, reports: opt.Reports, children: opt.Children, inviteEnabled: opt.InvitePages, chat: opt.Chat, inactive: opt.Inactive, version: opt.Version}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /family", h.view)
 	mux.HandleFunc("POST /family/rename", h.rename)
@@ -93,6 +99,9 @@ type handler struct {
 	reports         ReportCounter
 	children        ChildCreator
 	inviteEnabled   bool
+	chat            GuardianChat
+	inactive        []string
+	version         string
 }
 
 func (h *handler) session(w http.ResponseWriter, r *http.Request) (Session, bool) {
@@ -110,54 +119,6 @@ func headers(w http.ResponseWriter) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
-}
-
-func (h *handler) view(w http.ResponseWriter, r *http.Request) {
-	headers(w)
-	p, ok := h.session(w, r)
-	if !ok {
-		return
-	}
-	cards := h.store.Cards(p.GuardianID, p.TenantID)
-	full := fullGuardian(h.store, p)
-	// ?skin= previews a skin for this request only; it never changes storage.
-	opts := familydashboard.Options{Skin: r.URL.Query().Get("skin")}
-	if h.looks != nil {
-		pref := h.looks.Get(guardianSubject(p))
-		if opts.Skin == "" {
-			opts.Skin = pref.Skin
-		}
-		if figure, err := appearance.FigureSVG(pref.Figure, 44); err == nil {
-			opts.Avatar, opts.ProfileHref = figure, "/family/look"
-		}
-	}
-	fragment, err := familydashboard.RenderHTMLWithOptions(cards, opts)
-	if err != nil {
-		http.Error(w, "Unable to display family", http.StatusInternalServerError)
-		return
-	}
-	const page = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yapuno – Familie</title></head><body>{{.Fragment}}{{if .LookEnabled}}<p><a href="/family/look">Mein Look ändern</a></p>{{end}}{{if .SecurityEnabled}}<p><a href="/family/security">Sicherheit und Abmelden</a></p>{{end}}<section aria-label="Kinderprofile bearbeiten"><h2>Profile bearbeiten</h2>{{range .Cards}}{{if and .Permissions.ManageDevices .Permissions.ApproveContacts}}<form method="post" action="/family/rename"><label>Neuer Name für {{.DisplayName}}<input name="name" value="{{.DisplayName}}" required maxlength="40"></label><input type="hidden" name="child_id" value="{{.ID}}"><input type="hidden" name="csrf_token" value="{{$.Token}}"><button type="submit">Speichern</button></form>{{end}}{{if and $.DevicesEnabled .Permissions.ManageDevices}}<p><a href="/family/devices?child_id={{.ID}}">Geräte verwalten</a></p><p><a href="/family/devices/lost?child_id={{.ID}}">Gerät von {{.DisplayName}} verloren?</a></p>{{end}}{{if and $.ContactsEnabled .Permissions.ApproveContacts}}<p><a href="/family/contacts?child_id={{.ID}}">Kontakte von {{.DisplayName}} verwalten{{with index $.OpenReports .ID}} · {{.}}{{end}}</a></p>{{end}}{{end}}</section>{{if .CanAddChild}}<p><a href="/family/children">Weiteres Kind anlegen</a></p>{{end}}{{if .CanInvite}}<p><a href="/family/invite">Eine Familie einladen</a></p>{{end}}</body></html>`
-	t, err := template.New("page").Parse(page)
-	if err != nil {
-		http.Error(w, "Unable to display family", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := t.Execute(w, struct {
-		Token    string
-		Cards    []familydashboard.ChildCard
-		Fragment template.HTML
-
-		DevicesEnabled  bool
-		ContactsEnabled bool
-		LookEnabled     bool
-		SecurityEnabled bool
-		OpenReports     map[string]string
-		CanAddChild     bool
-		CanInvite       bool
-	}{CanAddChild: h.children != nil && full, CanInvite: h.inviteEnabled && full, Token: p.CSRFToken, Cards: cards, Fragment: template.HTML(fragment), DevicesEnabled: h.devicesEnabled, ContactsEnabled: h.contactsEnabled, LookEnabled: h.looks != nil, SecurityEnabled: h.securityEnabled, OpenReports: h.openReports(p, cards)}); err != nil {
-		return
-	}
 }
 
 // openReports returns a short count per child for guardians who may see that

@@ -62,7 +62,7 @@ func TestAGuardianAddsAChildToTheirOwnFamily(t *testing.T) {
 		t.Fatalf("form page: %d %v", form.Code, form.Header())
 	}
 	for _, want := range []string{`<html lang="de">`, `data-yp-skin="classic"`, "<h1>Weiteres Kind anlegen</h1>", `action="/family/children"`, `maxlength="40"`, `required`,
-		`name="csrf_token" value="` + sessionA.CSRFToken + `"`, `href="/family"`, "Geräte verwalten", "Betreiber", "synthetischen Profilen"} {
+		`name="csrf_token" value="` + sessionA.CSRFToken + `"`, `href="/family"`, "Geräte von …", "Betreiber", "synthetischen Profilen"} {
 		if !strings.Contains(form.Body.String(), want) {
 			t.Errorf("form page lacks %q", want)
 		}

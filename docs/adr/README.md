@@ -21,3 +21,4 @@ Yapuno follows an Atlas-inspired ADR process. An ADR states **why** a choice is 
 - [Emergency lock of a guardian's own access](draft-guardian-access-lock.md)
 - [Child-initiated block and single-message report to the child's own guardians](draft-report-and-block.md)
 - [Invited self-registration of families with self-declared guardianship](draft-invited-self-registration.md)
+- [Guardians as chat participants with their own child and with guardians of connected families](draft-guardian-chat.md)
