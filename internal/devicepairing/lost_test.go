@@ -137,8 +137,9 @@ func TestRevokeAllNeedsCurrentAuthorityForThatChild(t *testing.T) {
 
 // A pairing that is still in progress must not produce a fresh device after
 // the guardian has locked everything.
-func TestRevokeAllCancelsPairingsInProgress(t *testing.T) {
-	w := newLostWorld(t)
+// asking registers a fresh device and returns its token, code and key.
+func asking(t *testing.T, store *devicepairing.Store, name string) (string, string, *ecdsa.PrivateKey) {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -147,33 +148,35 @@ func TestRevokeAllCancelsPairingsInProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	approved, err := w.store.Start("anna", "family-a", "lea")
+	token, code, err := store.Request(name, der)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := w.store.Claim(approved, "Unknown phone", der, pairingtest.Sign(t, key, "yapuno-pair-claim-v1\x00"+approved))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := w.store.Approve("anna", "family-a", "lea", approved, fingerprint); err != nil {
+	return token, code, key
+}
+
+func TestRevokeAllCancelsPairingsInProgress(t *testing.T) {
+	w := newLostWorld(t)
+	// A device a guardian already approved for Lea, but that has not finished.
+	approved, code, key := asking(t, w.store, "Unknown phone")
+	if _, err := w.store.Approve("anna", "family-a", "lea", code); err != nil {
 		t.Fatal(err)
 	}
 	nonce, err := w.store.Nonce(approved)
 	if err != nil {
 		t.Fatal(err)
 	}
-	unclaimed, err := w.store.Start("anna", "family-a", "lea")
-	if err != nil {
+	// Approved pairings of a sibling and of a child with the same id in
+	// another family, and a device nobody approved yet.
+	siblingToken, siblingCode, siblingKey := asking(t, w.store, "Tims Handy")
+	if _, err := w.store.Approve("anna", "family-a", "tim", siblingCode); err != nil {
 		t.Fatal(err)
 	}
-	siblingToken, err := w.store.Start("anna", "family-a", "tim")
-	if err != nil {
+	namesakeToken, namesakeCode, namesakeKey := asking(t, w.store, "Other Lea")
+	if _, err := w.store.Approve("carla", "family-c", "lea", namesakeCode); err != nil {
 		t.Fatal(err)
 	}
-	namesakeToken, err := w.store.Start("carla", "family-c", "lea")
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, waitingCode, _ := asking(t, w.store, "Waiting")
 	// Only pairings were open: nothing was active, so the count is zero.
 	if n, err := w.store.RevokeAll("anna", "family-a", "lea"); err != nil || n != 0 {
 		t.Fatalf("lock with pairings only: %d %v", n, err)
@@ -181,19 +184,22 @@ func TestRevokeAllCancelsPairingsInProgress(t *testing.T) {
 	if _, err := w.store.Finish(approved, pairingtest.Sign(t, key, "yapuno-pair-finish-v1\x00"+nonce)); !errors.Is(err, devicepairing.ErrConsumed) {
 		t.Fatalf("approved pairing completed after lock: %v", err)
 	}
-	if _, err := w.store.Claim(unclaimed, "Thief", der, pairingtest.Sign(t, key, "yapuno-pair-claim-v1\x00"+unclaimed)); !errors.Is(err, devicepairing.ErrConsumed) {
-		t.Fatalf("open pairing code usable after lock: %v", err)
-	}
 	if w.active(t, "anna", "family-a", "lea") != 0 {
 		t.Fatal("a device became active after the lock")
 	}
-	// The sibling's pairing code is untouched.
-	if _, err := w.store.Claim(siblingToken, "Tims Handy", der, pairingtest.Sign(t, key, "yapuno-pair-claim-v1\x00"+siblingToken)); err != nil {
+	// The sibling's pairing is untouched.
+	siblingNonce, _ := w.store.Nonce(siblingToken)
+	if _, err := w.store.Finish(siblingToken, pairingtest.Sign(t, siblingKey, "yapuno-pair-finish-v1\x00"+siblingNonce)); err != nil {
 		t.Fatalf("sibling's pairing was cancelled: %v", err)
 	}
 	// Neither is the pairing of a child with the same id in another family.
-	if _, err := w.store.Claim(namesakeToken, "Other Lea", der, pairingtest.Sign(t, key, "yapuno-pair-claim-v1\x00"+namesakeToken)); err != nil {
+	namesakeNonce, _ := w.store.Nonce(namesakeToken)
+	if _, err := w.store.Finish(namesakeToken, pairingtest.Sign(t, namesakeKey, "yapuno-pair-finish-v1\x00"+namesakeNonce)); err != nil {
 		t.Fatalf("another family's pairing was cancelled: %v", err)
+	}
+	// A device that belongs to nobody yet is not Lea's and stays open.
+	if _, err := w.store.Approve("anna", "family-a", "tim", waitingCode); err != nil {
+		t.Fatalf("an unapproved request was cancelled: %v", err)
 	}
 	// A new pairing started after the lock works: the lock is not permanent.
 	if _, _ = pairingtest.Pair(t, w.store, "anna", "family-a", "lea"); w.active(t, "anna", "family-a", "lea") != 1 {
@@ -204,17 +210,8 @@ func TestRevokeAllCancelsPairingsInProgress(t *testing.T) {
 func TestNoDeviceBecomesActiveWhileLocking(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		w := newLostWorld(t)
-		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		der, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
-		token, err := w.store.Start("anna", "family-a", "lea")
-		if err != nil {
-			t.Fatal(err)
-		}
-		fingerprint, err := w.store.Claim(token, "Racing phone", der, pairingtest.Sign(t, key, "yapuno-pair-claim-v1\x00"+token))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := w.store.Approve("anna", "family-a", "lea", token, fingerprint); err != nil {
+		token, code, key := asking(t, w.store, "Racing phone")
+		if _, err := w.store.Approve("anna", "family-a", "lea", code); err != nil {
 			t.Fatal(err)
 		}
 		nonce, _ := w.store.Nonce(token)

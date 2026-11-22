@@ -383,7 +383,7 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		mux.Handle("/family/contacts/", contactRoutes)
 	}
 	if opt.pairing != nil {
-		deviceRoutes, err := familyweb.NewDevicePages(auth, opt.pairing, origin)
+		deviceRoutes, err := familyweb.NewDevicePages(auth, opt.pairing, store, origin, looks)
 		if err != nil {
 			return nil, err
 		}

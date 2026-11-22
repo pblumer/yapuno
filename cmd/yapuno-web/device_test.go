@@ -1,6 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,6 +19,7 @@ import (
 
 	"github.com/pblumer/yapuno/internal/authz"
 	"github.com/pblumer/yapuno/internal/devicepairing"
+	"github.com/pblumer/yapuno/internal/devicepairing/pairingtest"
 	"github.com/pblumer/yapuno/internal/familydashboard"
 	"github.com/pblumer/yapuno/internal/familystore"
 	"github.com/pblumer/yapuno/internal/guardiandirectory"
@@ -65,11 +73,11 @@ func TestOptionalGuardianDeviceRoutes(t *testing.T) {
 	view.AddCookie(cookie)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, view)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Geräte verwalten") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Geräte von Alex") || !strings.Contains(w.Body.String(), "app.example.org/pair") {
 		t.Fatalf("guardian device page: %d", w.Code)
 	}
-	form := url.Values{"csrf_token": {"forged"}, "child_id": {"child-a"}}
-	request := httptest.NewRequest(http.MethodPost, "https://app.example.org/family/devices/start", strings.NewReader(form.Encode()))
+	form := url.Values{"csrf_token": {"forged"}, "child_id": {"child-a"}, "code": {"123456"}}
+	request := httptest.NewRequest(http.MethodPost, "https://app.example.org/family/devices/connect", strings.NewReader(form.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.AddCookie(cookie)
 	w = httptest.NewRecorder()
@@ -86,4 +94,80 @@ func TestOptionalGuardianDeviceRoutes(t *testing.T) {
 		}
 	}
 
+	// The whole pairing through the real routes: the device asks for a code
+	// without any session, the guardian enters it, the device finishes and
+	// signs in as that child.
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	api := func(path string, payload map[string]string) (int, map[string]any) {
+		body, _ := json.Marshal(payload)
+		r := httptest.NewRequest(http.MethodPost, "https://app.example.org"+path, bytes.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		// What an iPhone sends from these pages.
+		r.Header.Set("Origin", "null")
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, r)
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	status, asked := api("/pair/request", map[string]string{"name": "iPhone", "public_key": base64.RawURLEncoding.EncodeToString(der)})
+	if status != http.StatusOK {
+		t.Fatalf("device request: %d", status)
+	}
+	token, code := asked["token"].(string), asked["code"].(string)
+	if status, _ := api("/pair/nonce", map[string]string{"token": token}); status != http.StatusAccepted {
+		t.Fatalf("device before approval: %d", status)
+	}
+	page := httptest.NewRequest(http.MethodGet, pathURL, nil)
+	page.AddCookie(cookie)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, page)
+	csrf := csrfField.FindStringSubmatch(w.Body.String())
+	if csrf == nil {
+		t.Fatal("no CSRF token on the device page")
+	}
+	form = url.Values{"csrf_token": {csrf[1]}, "child_id": {"child-a"}, "code": {code}}
+	request = httptest.NewRequest(http.MethodPost, "https://app.example.org/family/devices/connect", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, request)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("guardian enters the code: %d %s", w.Code, w.Body)
+	}
+	status, ready := api("/pair/nonce", map[string]string{"token": token})
+	if status != http.StatusOK {
+		t.Fatalf("device after approval: %d", status)
+	}
+	proof := base64.RawURLEncoding.EncodeToString(pairingtest.Sign(t, key, "yapuno-pair-finish-v1\x00"+ready["nonce"].(string)))
+	status, done := api("/pair/finish", map[string]string{"token": token, "signature": proof})
+	if status != http.StatusOK {
+		t.Fatalf("device finish: %d", status)
+	}
+	child := childLogin(t, handler, done["device_id"].(string), key)
+	home := httptest.NewRequest(http.MethodGet, "https://app.example.org/child", nil)
+	home.AddCookie(child)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, home)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Hoi Alex!") {
+		t.Fatalf("paired device does not sign in as the child: %d", w.Code)
+	}
+	// Nothing of the old flow is served any more.
+	for _, gone := range []string{"/pair/scan", "/family/devices/start", "/family/devices/status", "/family/devices/approve", "/family/devices/qr-render.js"} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			r := httptest.NewRequest(method, "https://app.example.org"+gone, strings.NewReader("csrf_token="+csrf[1]+"&child_id=child-a"))
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			r.AddCookie(cookie)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, r)
+			if rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+				t.Errorf("%s %s still served: %d", method, gone, rec.Code)
+			}
+		}
+	}
 }

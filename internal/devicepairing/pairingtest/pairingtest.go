@@ -30,8 +30,9 @@ func LoginProof(t testing.TB, key *ecdsa.PrivateKey, deviceID, nonce string) []b
 	return Sign(t, key, "yapuno-device-login-v1\x00"+deviceID+"."+nonce)
 }
 
-// Pair claims, approves and finishes a pairing for one child and returns the
-// new device id with its private key.
+// Pair runs the real pairing for one child: the device asks for a code, the
+// guardian enters it, the device proves its key. It returns the new device id
+// with its private key.
 func Pair(t testing.TB, store *devicepairing.Store, guardian, tenant, child string) (string, *ecdsa.PrivateKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -42,15 +43,11 @@ func Pair(t testing.TB, store *devicepairing.Store, guardian, tenant, child stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := store.Start(guardian, tenant, child)
+	token, code, err := store.Request("Test phone", der)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := store.Claim(token, "Test phone", der, Sign(t, key, "yapuno-pair-claim-v1\x00"+token))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Approve(guardian, tenant, child, token, fingerprint); err != nil {
+	if _, err := store.Approve(guardian, tenant, child, code); err != nil {
 		t.Fatal(err)
 	}
 	nonce, err := store.Nonce(token)
