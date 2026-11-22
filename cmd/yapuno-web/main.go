@@ -181,6 +181,14 @@ func (r routedMessages) Recent(p messages.Principal, id string, limit int) ([]me
 	return r.children.Recent(p, id, limit)
 }
 
+const (
+	// guardianSessionLifetime is how long a guardian stays signed in.
+	guardianSessionLifetime = 30 * time.Minute
+	// rememberGuardiansFor applies instead when the guardian asked to stay
+	// signed in on a device and a session file is configured.
+	rememberGuardiansFor = 30 * 24 * time.Hour
+)
+
 // app is the HTTP handler plus the background work that belongs to it.
 type app struct {
 	handler http.Handler
@@ -306,12 +314,22 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 			return nil, err
 		}
 	}
-	login, err := guardianlogin.New(guardianlogin.Config{Origin: origin, Directory: directory, Sender: sender, Sessions: sessions, Now: time.Now})
+	loginConfig := guardianlogin.Config{Origin: origin, Directory: directory, Sender: sender, Sessions: sessions, Now: time.Now, PairingPage: opt.pairing != nil}
+	inactive := opt.inactive()
+	if sessions.Remembers() {
+		// The last step of the sign-in offers to stay signed in on that device.
+		loginConfig.Remembered = sessions
+		loginConfig.RememberDays = int(sessions.RememberedFor() / (24 * time.Hour))
+		loginConfig.SessionMinutes = int(sessions.Lifetime() / time.Minute)
+	} else {
+		inactive = append(inactive, "Angemeldet bleiben")
+	}
+	login, err := guardianlogin.New(loginConfig)
 	if err != nil {
 		return nil, err
 	}
 	auth := verifiedSessions{sessions: sessions, directory: directory}
-	familyOptions := familyweb.Options{DevicePages: opt.pairing != nil, ContactPages: opt.contacts != nil, SecurityPages: true, Inactive: opt.inactive(), Version: version}
+	familyOptions := familyweb.Options{DevicePages: opt.pairing != nil, ContactPages: opt.contacts != nil, SecurityPages: true, Inactive: inactive, Version: version}
 	if opt.guardianChat != nil {
 		// From here on the chat asks the directory that knows the locks.
 		if err := opt.guardianChat.SetGuardians(directory); err != nil {
@@ -523,6 +541,7 @@ func main() {
 	reportsPath := flag.String("reports", os.Getenv("YAPUNO_REPORTS_FILE"), "optional private file for messages children report to their guardians; requires messages")
 	guardianLocksPath := flag.String("guardian-locks", os.Getenv("YAPUNO_GUARDIAN_LOCKS_FILE"), "optional private file for emergency locks of guardian access")
 	guardianChatPath := flag.String("guardian-chat", os.Getenv("YAPUNO_GUARDIAN_CHAT_FILE"), "optional private log for chats of guardians with their own children and with guardians of connected families")
+	sessionsPath := flag.String("guardian-sessions", os.Getenv("YAPUNO_GUARDIAN_SESSIONS_FILE"), "optional private file; lets guardians stay signed in on a device for 30 days, also across restarts")
 	signupPath := flag.String("signup", os.Getenv("YAPUNO_SIGNUP_FILE"), "optional private invitation file; switches invited self-registration on (guardianship is then self-declared)")
 	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
 	flag.Parse()
@@ -623,9 +642,14 @@ func main() {
 	if err != nil {
 		log.Fatal("invalid SMTP configuration; TLS 465 is required")
 	}
-	sessions, err := guardiansession.New(time.Now, 30*time.Minute)
+	sessions, err := guardiansession.New(time.Now, guardianSessionLifetime)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if *sessionsPath != "" {
+		if err := sessions.Remember(*sessionsPath, rememberGuardiansFor); err != nil {
+			log.Fatal("guardian session file unavailable, insecure or corrupt")
+		}
 	}
 	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore, guardianChat: guardianChatStore})
 	if err != nil {

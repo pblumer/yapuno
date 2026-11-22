@@ -166,3 +166,13 @@ func TestTheGuideDescribesTheShortestWayThisInstallationOffers(t *testing.T) {
 		t.Fatalf("guide: %s", contactsOnly)
 	}
 }
+
+// Staying signed in could not be stored: the guardian is signed in, but only
+// for the ordinary time, and is told so.
+func TestTheOverviewSaysWhenStayingSignedInDidNotWork(t *testing.T) {
+	cw := newChatWorld(t)
+	body := cw.homeAt(t, Options{SecurityPages: true}, "/family?done=not-remembered")
+	if !strings.Contains(body, `role="alert"`) || !strings.Contains(body, "nicht gespeichert") || strings.Contains(body, `role="status"`) {
+		t.Fatalf("overview: %s", body)
+	}
+}

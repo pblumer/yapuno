@@ -151,6 +151,9 @@ type securityServer struct {
 	mailer    *noticeMailer
 	handler   http.Handler
 	lockPath  string
+	// sessionsPath makes guardians able to stay signed in; every start then
+	// uses a fresh session manager that reads this file.
+	sessionsPath string
 	// signupPath switches invited self-registration on when it is set.
 	signupPath string
 	// chatPath switches the guardians' chat on when it is set; contacts and
@@ -237,6 +240,16 @@ func (s *securityServer) start(withLocks bool) {
 		chat := s.guardianChat
 		s.t.Cleanup(func() { _ = chat.Close() })
 		opt.contacts, opt.messages, opt.guardianChat = s.contacts, s.messages, s.guardianChat
+	}
+	if s.sessionsPath != "" {
+		sessions, err := guardiansession.New(time.Now, guardianSessionLifetime)
+		if err != nil {
+			s.t.Fatal(err)
+		}
+		if err := sessions.Remember(s.sessionsPath, rememberGuardiansFor); err != nil {
+			s.t.Fatal(err)
+		}
+		s.sessions = sessions
 	}
 	handler, err := newHandler("https://app.example.org", s.families, s.guardians, s.mailer, s.sessions, opt)
 	if err != nil {
