@@ -56,6 +56,22 @@ func TestTheFamilyOverviewOffersEveryFunctionAsAVisibleControl(t *testing.T) {
 	}
 }
 
+func TestALongVersionIsShortenedSoItFitsAPhone(t *testing.T) {
+	cw := newChatWorld(t)
+	commit := "0784135a9c1e4f6b8d2a3c5e7f9012345678abcd"
+	body := cw.home(t, testAuth{session: sessionA}, Options{Version: commit}).Body.String()
+	if !strings.Contains(body, "Version 0784135a9c1e") || strings.Contains(body, commit) {
+		t.Fatal("a full commit id is shown unshortened")
+	}
+	if body := cw.home(t, testAuth{session: sessionA}, Options{Version: "v1.2"}).Body.String(); !strings.Contains(body, "Version v1.2") {
+		t.Fatal("a short version is changed")
+	}
+	// Whatever the build passes in is shown as text only.
+	if body := cw.home(t, testAuth{session: sessionA}, Options{Version: "<b>x</b>"}).Body.String(); strings.Contains(body, "<b>x</b>") {
+		t.Fatal("version rendered as markup")
+	}
+}
+
 func TestTheOverviewSaysWhatThisInstallationDoesNotOffer(t *testing.T) {
 	cw := newChatWorld(t)
 	w := cw.home(t, testAuth{session: sessionA}, Options{SecurityPages: true, Inactive: []string{"Geräte verbinden", "Registrierung per Einladung"}})

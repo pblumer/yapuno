@@ -56,6 +56,15 @@ var homePage = template.Must(template.New("home").Parse(`<!doctype html><html la
 <p class="yp-muted">Vorschau mit synthetischen Profilen.{{if .Version}} Version {{.Version}}{{end}}</p>
 </div></main></body></html>`))
 
+// shortVersion keeps a build stamp readable on a phone: a commit id is cut
+// to its first twelve characters.
+func shortVersion(v string) string {
+	if len(v) > 12 {
+		return v[:12]
+	}
+	return v
+}
+
 // homeChild is one child of the guardian with exactly the actions the
 // guardian's grant and this installation allow.
 type homeChild struct {
@@ -124,7 +133,7 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 		DevicesEnabled, ContactsEnabled, ChatEnabled bool
 		LookEnabled, SecurityEnabled                 bool
 		CanAddChild, CanInvite                       bool
-	}{Skin: def.ID, CSRF: p.CSRFToken, Inactive: strings.Join(h.inactive, ", "), Version: h.version,
+	}{Skin: def.ID, CSRF: p.CSRFToken, Inactive: strings.Join(h.inactive, ", "), Version: shortVersion(h.version),
 		CSS: template.CSS(fonts + ".yp-page{" + decls + "}\n" + contactCSS + lostCSS + homeCSS), Figure: figure, Children: children,
 		DevicesEnabled: h.devicesEnabled, ContactsEnabled: h.contactsEnabled, ChatEnabled: h.chat != nil,
 		LookEnabled: h.looks != nil, SecurityEnabled: h.securityEnabled,
