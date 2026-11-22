@@ -274,10 +274,7 @@ func TestFamilyPageLinksToLostDeviceWhenDevicePagesAreEnabled(t *testing.T) {
 
 func TestDevicePageLinksToLostDevice(t *testing.T) {
 	lw := newLostWorld(t)
-	h, err := NewDevicePages(testAuth{session: sessionA}, lw.pairing)
-	if err != nil {
-		t.Fatal(err)
-	}
+	h := lw.devicePages(t, testAuth{session: sessionA})
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/family/devices?child_id=child-a", nil))
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `href="/family/devices/lost?child_id=child-a"`) {

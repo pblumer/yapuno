@@ -62,7 +62,7 @@ be in someone else's hands. A lock stops sign-in links, ends all sessions and
 notifies the other guardians of the same children; only the operator lifts it.
 See [the three steps and their limits](docs/planning/guardian-account-safety.md)
 and the [proposed ADR](docs/adr/draft-guardian-access-lock.md).
-**Browser key-based child enrollment and explicit guardian fingerprint approval are now wired** using a short-lived invitation link. **Locally rendered QR images and a child scanner page** are now included. The scanner supports the browser's BarcodeDetector where available, otherwise the native phone camera or a shared link. Messaging authorization and real iPhone/Android tests are still open. See [the browser pairing flow](docs/planning/browser-device-pairing.md).
+**A child's device is paired with a short code:** the device opens `/pair` and shows six digits, a signed-in guardian types them under "Geräte von …", and the device finishes by itself with a key that never leaves it. Nothing is scanned or compared. Real iPhone and Android tests are still open. See [device pairing](docs/planning/device-pairing.md) and the [proposed ADR](docs/adr/draft-device-pairing-by-code.md).
 
 ## Invited self-registration (preview, off by default)
 

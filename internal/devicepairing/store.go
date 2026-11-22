@@ -1,5 +1,10 @@
-// Package devicepairing persists a one-time, guardian-approved device binding.
-// It is a privileged backend primitive; no unauthenticated HTTP route exists.
+// Package devicepairing persists guardian-approved device bindings.
+//
+// A device that wants to be paired asks for a short code and shows it. A
+// guardian reads the code off that device and enters it for one of their
+// children; the device then proves possession of its key and is bound. The
+// code is what ties the guardian's decision to the physical device in their
+// hand, so it must only ever be read from that device.
 package devicepairing
 
 import (
@@ -12,8 +17,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -27,19 +35,76 @@ var (
 	ErrExpired   = errors.New("pairing challenge expired")
 	ErrNotReady  = errors.New("pairing challenge is not ready")
 	ErrConsumed  = errors.New("pairing challenge already used")
+	// ErrNotFound means a well-formed code that no open request carries.
+	ErrNotFound = errors.New("no open pairing request has this code")
+	// ErrRateLimited means this guardian entered too many unknown codes.
+	ErrRateLimited = errors.New("too many unknown pairing codes")
+	// ErrBusy means too many devices are waiting for approval right now.
+	ErrBusy = errors.New("too many open pairing requests")
 )
 
-const challengeTTL = 5 * time.Minute
-const maxChallenges = 10000
+const (
+	challengeTTL = 5 * time.Minute
+	// maxPending bounds requests that wait for a guardian. Anybody can ask
+	// for a code, so this also bounds how many codes are live at once.
+	maxPending = 200
+	// maxWrongCodes unknown codes per guardian within wrongCodeWindow.
+	maxWrongCodes   = 5
+	wrongCodeWindow = 10 * time.Minute
+)
+
+// A code is five random digits and a check digit.
+var codePattern = regexp.MustCompile(`^[0-9]{6}$`)
+
+// damm is the quasigroup of the Damm algorithm. Its check digit detects
+// every single wrong digit and every swap of two neighbouring digits, so a
+// mistyped code is never another device's code.
+var damm = [10][10]byte{
+	{0, 3, 1, 7, 5, 9, 8, 6, 4, 2},
+	{7, 0, 9, 2, 1, 5, 4, 8, 6, 3},
+	{4, 2, 0, 6, 8, 7, 1, 3, 5, 9},
+	{1, 7, 5, 0, 9, 8, 3, 4, 2, 6},
+	{6, 1, 2, 3, 0, 4, 5, 9, 7, 8},
+	{3, 6, 7, 4, 2, 0, 9, 5, 8, 1},
+	{5, 8, 6, 9, 7, 2, 0, 1, 3, 4},
+	{8, 9, 4, 5, 3, 6, 2, 0, 1, 7},
+	{9, 4, 3, 8, 6, 1, 7, 2, 0, 5},
+	{2, 5, 8, 1, 4, 3, 6, 7, 9, 0},
+}
+
+func dammInterim(digits string) byte {
+	var interim byte
+	for i := 0; i < len(digits); i++ {
+		interim = damm[interim][digits[i]-'0']
+	}
+	return interim
+}
+
+// dammDigit returns the check digit for a string of decimal digits.
+func dammDigit(digits string) byte { return '0' + dammInterim(digits) }
+
+// validCode reports whether a code is six digits with a correct check digit.
+func validCode(code string) bool {
+	return codePattern.MatchString(code) && dammInterim(code) == 0
+}
+
+// normalizeCode drops the spaces and dashes people type when they read a
+// code off a screen.
+func normalizeCode(code string) string {
+	return strings.NewReplacer(" ", "", "-", "", "\u00a0", "").Replace(code)
+}
 
 type FamilyReader interface {
 	Cards(guardianID, tenantID string) []familydashboard.ChildCard
 }
 
+// Challenge is one pairing in progress. It starts with the device's key and
+// code; TenantID, ChildID and Approver are set when a guardian enters the code.
 type Challenge struct {
 	Digest      string    `json:"digest"`
-	TenantID    string    `json:"tenant_id"`
-	ChildID     string    `json:"child_id"`
+	TenantID    string    `json:"tenant_id,omitempty"`
+	ChildID     string    `json:"child_id,omitempty"`
+	Code        string    `json:"code,omitempty"`
 	Expires     time.Time `json:"expires"`
 	Name        string    `json:"name,omitempty"`
 	PublicKey   string    `json:"public_key,omitempty"`
@@ -69,6 +134,20 @@ type Store struct {
 	families FamilyReader
 	now      func() time.Time
 	state    state
+	// wrong remembers, per guardian, when unknown codes were entered. It is
+	// kept in memory only: a restart forgives, which is harmless.
+	wrong map[string][]time.Time
+	// draw returns five random digits as a number below 100000. It is a
+	// field so tests can make it repeat; production uses crypto/rand.
+	draw func() (int64, error)
+}
+
+func drawDigits() (int64, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(100000))
+	if err != nil {
+		return 0, err
+	}
+	return n.Int64(), nil
 }
 
 // Open is single-writer per file; a shared transactional backend is required
@@ -77,7 +156,7 @@ func Open(path string, families FamilyReader, now func() time.Time) (*Store, err
 	if path == "" || families == nil || now == nil {
 		return nil, ErrInvalid
 	}
-	s := &Store{path: path, families: families, now: now}
+	s := &Store{path: path, families: families, now: now, wrong: map[string][]time.Time{}, draw: drawDigits}
 	stat, statErr := os.Lstat(path)
 	if statErr == nil && (!stat.Mode().IsRegular() || stat.Mode().Perm()&0077 != 0) {
 		return nil, ErrInvalid
@@ -97,7 +176,8 @@ func Open(path string, families FamilyReader, now func() time.Time) (*Store, err
 	}
 	seen := make(map[string]bool)
 	for _, c := range s.state.Challenges {
-		if c.Digest == "" || c.TenantID == "" || c.ChildID == "" || seen[c.Digest] {
+		// A request that a guardian approved must name the child it is for.
+		if c.Digest == "" || seen[c.Digest] || (c.Approver != "" && (c.TenantID == "" || c.ChildID == "")) {
 			return nil, ErrInvalid
 		}
 		seen[c.Digest] = true
@@ -200,37 +280,58 @@ func (s *Store) clone() state {
 	return state{Challenges: append([]Challenge(nil), s.state.Challenges...), Devices: append([]Device(nil), s.state.Devices...)}
 }
 
-// Start is called by a verified guardian for a child they may manage. Its
-// secret token belongs in a short-lived QR code, never in logs or storage.
-func (s *Store) Start(guardian, tenant, child string) (string, error) {
+// live reports whether a challenge can still be used.
+func (s *Store) live(c Challenge) bool {
+	return !c.Consumed && s.now().Before(c.Expires)
+}
+
+// Request is called by a device that wants to be paired; nobody is
+// authenticated yet. It stores the device's public key and returns a secret
+// token, which stays on the device, and a short code, which the device shows.
+// The request binds nothing until a guardian enters the code.
+func (s *Store) Request(name string, publicDER []byte) (token, code string, err error) {
+	if _, err := parseKey(publicDER); err != nil || !validName(name) {
+		return "", "", ErrInvalid
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.allowed(guardian, tenant, child) {
-		return "", ErrForbidden
+	// Finished and expired pairings are dropped on the way.
+	next := state{Devices: append([]Device(nil), s.state.Devices...)}
+	pending := 0
+	taken := map[string]bool{}
+	for _, c := range s.state.Challenges {
+		if !s.live(c) {
+			continue
+		}
+		next.Challenges = append(next.Challenges, c)
+		if c.Approver == "" {
+			pending++
+			taken[c.Code] = true
+		}
 	}
-	token, err := random(32)
-	if err != nil {
-		return "", err
+	if pending >= maxPending {
+		return "", "", ErrBusy
+	}
+	if token, err = random(32); err != nil {
+		return "", "", err
+	}
+	for code == "" || taken[code] {
+		n, err := s.draw()
+		if err != nil || n < 0 || n > 99999 {
+			return "", "", ErrInvalid
+		}
+		digits := fmt.Sprintf("%05d", n)
+		code = digits + string(dammDigit(digits))
 	}
 	key, _ := digest(token)
-	next := s.clone()
-	if len(next.Challenges) >= maxChallenges {
-		kept := next.Challenges[:0]
-		for _, c := range next.Challenges {
-			if !c.Consumed && s.now().Before(c.Expires) {
-				kept = append(kept, c)
-			}
-		}
-		next.Challenges = kept
-		if len(next.Challenges) >= maxChallenges {
-			return "", ErrInvalid
-		}
-	}
-	next.Challenges = append(next.Challenges, Challenge{Digest: key, TenantID: tenant, ChildID: child, Expires: s.now().Add(challengeTTL)})
+	fingerprint := sha256.Sum256(publicDER)
+	next.Challenges = append(next.Challenges, Challenge{Digest: key, Code: code, Name: name,
+		PublicKey: base64.RawURLEncoding.EncodeToString(publicDER), Fingerprint: hex.EncodeToString(fingerprint[:]),
+		Expires: s.now().Add(challengeTTL)})
 	if err := s.commit(next); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return token, nil
+	return token, code, nil
 }
 
 func parseKey(data []byte) (*ecdsa.PublicKey, error) {
@@ -258,71 +359,54 @@ func validName(name string) bool {
 	return len(name) > 0 && len(name) <= 64 && !strings.ContainsAny(name, "\r\n\x00<>")
 }
 
-// Claim proves control of a P-256 private key. The guardian must later approve
-// the exact fingerprint displayed on the enrolling device.
-func (s *Store) Claim(token, name string, publicDER, claimSignature []byte) (string, error) {
-	key, err := parseKey(publicDER)
-	if err != nil || !validName(name) {
-		return "", ErrInvalid
-	}
-	if !verify(key, "yapuno-pair-claim-v1\x00", []byte(token), claimSignature) {
-		return "", ErrInvalid
-	}
-	d, ok := digest(token)
-	if !ok {
-		return "", ErrInvalid
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	i := s.index(d)
-	if err := s.validChallenge(i); err != nil {
-		return "", err
-	}
-	if s.state.Challenges[i].PublicKey != "" {
-		return "", ErrNotReady
-	}
-	fingerprint := sha256.Sum256(publicDER)
-	next := s.clone()
-	next.Challenges[i].Name = name
-	next.Challenges[i].PublicKey = base64.RawURLEncoding.EncodeToString(publicDER)
-	next.Challenges[i].Fingerprint = hex.EncodeToString(fingerprint[:])
-	if err := s.commit(next); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(fingerprint[:]), nil
-}
-
-// Approve requires a verified guardian session and explicit confirmation of
-// the full key fingerprint. Equal guardians with the same child grant may approve.
-func (s *Store) Approve(guardian, tenant, child, token, expectedFingerprint string) error {
-	d, ok := digest(token)
-	if !ok {
-		return ErrInvalid
-	}
+// Approve binds the request that carries this code to one child of a
+// verified guardian and returns the name the device gave itself. The guardian
+// must have read the code off the device they hold: whoever supplies the
+// code decides which device is bound.
+//
+// A code that fails its check digit is a typo (ErrInvalid) and costs nothing.
+// A well-formed code that no open request carries is ErrNotFound; a guardian
+// who enters too many of those is refused for a while, so codes cannot be
+// guessed to capture another family's device.
+func (s *Store) Approve(guardian, tenant, child, code string) (string, error) {
+	code = normalizeCode(code)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.allowed(guardian, tenant, child) {
-		return ErrForbidden
+		return "", ErrForbidden
 	}
-	i := s.index(d)
-	if err := s.validChallenge(i); err != nil {
-		return err
+	if !validCode(code) {
+		return "", ErrInvalid
 	}
-	c := s.state.Challenges[i]
-	if c.TenantID != tenant || c.ChildID != child {
-		return ErrForbidden
+	who, now := tenant+"\x00"+guardian, s.now()
+	recent := s.wrong[who][:0]
+	for _, at := range s.wrong[who] {
+		if now.Sub(at) < wrongCodeWindow {
+			recent = append(recent, at)
+		}
 	}
-	if c.PublicKey == "" || c.Fingerprint == "" || c.Fingerprint != expectedFingerprint || c.Approver != "" {
-		return ErrNotReady
+	s.wrong[who] = recent
+	if len(recent) >= maxWrongCodes {
+		return "", ErrRateLimited
 	}
-	nonce, err := random(32)
-	if err != nil {
-		return err
+	for i, c := range s.state.Challenges {
+		if c.Code != code || c.Approver != "" || !s.live(c) {
+			continue
+		}
+		nonce, err := random(32)
+		if err != nil {
+			return "", err
+		}
+		next := s.clone()
+		next.Challenges[i].TenantID, next.Challenges[i].ChildID = tenant, child
+		next.Challenges[i].Approver, next.Challenges[i].Nonce = guardian, nonce
+		if err := s.commit(next); err != nil {
+			return "", err
+		}
+		return c.Name, nil
 	}
-	next := s.clone()
-	next.Challenges[i].Approver = guardian
-	next.Challenges[i].Nonce = nonce
-	return s.commit(next)
+	s.wrong[who] = append(s.wrong[who], now)
+	return "", ErrNotFound
 }
 
 // Nonce is a public proof-of-possession challenge, not a device credential.

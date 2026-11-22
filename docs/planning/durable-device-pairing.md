@@ -1,5 +1,7 @@
 # Durable guardian-approved device pairing core
 
+> **Superseded.** Pairing now works with a short code that the device shows and the guardian types; the QR link, the scanner and the fingerprint comparison described here were removed. See [device pairing](device-pairing.md). This note is kept as history.
+
 **Status:** Backend primitive only. Not a runnable QR onboarding experience and
 not approved for real child use. Implements the accepted guardian trust ADR
 without replacing the separate identity, device-session, messaging or privacy

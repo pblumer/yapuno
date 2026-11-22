@@ -60,7 +60,8 @@ func signASN1(t *testing.T, key *ecdsa.PrivateKey, message string) []byte {
 	return sig
 }
 
-// pair runs the real guardian-approved pairing flow and returns the device.
+// pair runs the real pairing (the device asks for a code, the guardian
+// enters it, the device proves its key) and returns the device.
 func (w *world) pair(t *testing.T, guardian, tenant, child string) device {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -71,15 +72,11 @@ func (w *world) pair(t *testing.T, guardian, tenant, child string) device {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := w.pairing.Start(guardian, tenant, child)
+	token, code, err := w.pairing.Request("Test phone", der)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := w.pairing.Claim(token, "Test phone", der, signASN1(t, key, "yapuno-pair-claim-v1\x00"+token))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := w.pairing.Approve(guardian, tenant, child, token, fingerprint); err != nil {
+	if _, err := w.pairing.Approve(guardian, tenant, child, code); err != nil {
 		t.Fatal(err)
 	}
 	nonce, err := w.pairing.Nonce(token)

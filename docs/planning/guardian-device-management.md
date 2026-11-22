@@ -1,5 +1,7 @@
 # Guardian device management — browser preview
 
+> **Superseded.** Pairing now works with a short code that the device shows and the guardian types; the QR link, the scanner and the fingerprint comparison described here were removed. See [device pairing](device-pairing.md). This note is kept as history.
+
 **Status:** The guardian-facing part of Magic Pairing is wired to the
 existing browser login. This is an engineering preview for synthetic child
 profiles. A link-based child WebCrypto and guardian fingerprint approval flow

@@ -1,5 +1,6 @@
-// Package pairingweb serves the child-side pairing proof-of-possession flow.
-// It never creates sessions or grants contact or conversation permissions.
+// Package pairingweb serves the pages and endpoints a device uses to be
+// paired. Nobody is signed in here: a device asks for a short code, shows it,
+// and waits until a guardian has entered that code in the guardian area.
 package pairingweb
 
 import (
@@ -22,17 +23,11 @@ var pairHTML []byte
 //go:embed pair.js
 var pairJS []byte
 
-//go:embed scan.html
-var scanHTML []byte
-
-//go:embed scan.js
-var scanJS []byte
-
-//go:embed scan-utils.js
-var scanUtilsJS []byte
+// lifetime is how long the device should show a code, in seconds.
+const lifetime = 300
 
 type Store interface {
-	Claim(token, name string, publicDER, claimSignature []byte) (string, error)
+	Request(name string, publicDER []byte) (token, code string, err error)
 	Nonce(token string) (string, error)
 	Finish(token string, signature []byte) (devicepairing.Device, error)
 }
@@ -41,8 +36,9 @@ type handler struct {
 	store Store
 }
 
-// New exposes only a narrowly bounded same-origin pairing flow. Neither a
-// guardian nor a child session can be minted from a pairing token alone.
+// New exposes only a narrowly bounded same-origin pairing flow. Nothing here
+// creates a guardian or child session, and nothing is bound to a child until
+// a signed-in guardian enters the code.
 func New(store Store) (http.Handler, error) {
 	if store == nil {
 		return nil, errors.New("pairing storage required")
@@ -51,10 +47,7 @@ func New(store Store) (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /pair", h.page)
 	mux.HandleFunc("GET /pair/app.js", h.script)
-	mux.HandleFunc("GET /pair/scan", h.scanner)
-	mux.HandleFunc("GET /pair/scan.js", h.scannerScript)
-	mux.HandleFunc("GET /pair/scan-utils.js", h.scannerUtils)
-	mux.HandleFunc("POST /pair/claim", h.claim)
+	mux.HandleFunc("POST /pair/request", h.request)
 	mux.HandleFunc("POST /pair/nonce", h.nonce)
 	mux.HandleFunc("POST /pair/finish", h.finish)
 	return mux, nil
@@ -82,34 +75,17 @@ func (h *handler) script(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(pairJS)
 }
 
-func (h *handler) scanner(w http.ResponseWriter, _ *http.Request) {
-	securityHeaders(w)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(scanHTML)
-}
-
-func (h *handler) scannerScript(w http.ResponseWriter, _ *http.Request) {
-	securityHeaders(w)
-	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	_, _ = w.Write(scanJS)
-}
-
-func (h *handler) scannerUtils(w http.ResponseWriter, _ *http.Request) {
-	securityHeaders(w)
-	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	_, _ = w.Write(scanUtilsJS)
-}
-
 type request struct {
-	Token     string `json:"token"`
-	Name      string `json:"name"`
-	PublicKey string `json:"public_key"`
-	Signature string `json:"signature"`
+	Token     string `json:"token,omitempty"`
+	Name      string `json:"name,omitempty"`
+	PublicKey string `json:"public_key,omitempty"`
+	Signature string `json:"signature,omitempty"`
 }
 
+// readRequest accepts a small same-origin JSON body without unknown fields
+// or trailing data. These endpoints are unauthenticated: no cross-origin
+// call, not even a simple cross-site form post, may reach the backend.
 func readRequest(w http.ResponseWriter, r *http.Request) (request, bool) {
-	// This is an unauthenticated, token-bound API. No cross-origin calls,
-	// even simple cross-site form posts, may reach the backend.
 	if !sameorigin.Request(r) {
 		http.Error(w, "Same-origin HTTPS required", http.StatusForbidden)
 		return request{}, false
@@ -130,6 +106,15 @@ func readRequest(w http.ResponseWriter, r *http.Request) (request, bool) {
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return request{}, false
+	}
+	return input, true
+}
+
+// tokenRequest is readRequest for the calls a device makes with its token.
+func tokenRequest(w http.ResponseWriter, r *http.Request) (request, bool) {
+	input, ok := readRequest(w, r)
+	if !ok {
 		return request{}, false
 	}
 	decodedToken, err := base64.RawURLEncoding.DecodeString(input.Token)
@@ -162,45 +147,53 @@ func pairingError(w http.ResponseWriter, err error) {
 		http.Error(w, "Pairing not allowed", http.StatusForbidden)
 	case errors.Is(err, devicepairing.ErrInvalid):
 		http.Error(w, "Invalid pairing request", http.StatusBadRequest)
+	case errors.Is(err, devicepairing.ErrBusy):
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "Too many devices are waiting", http.StatusServiceUnavailable)
 	default:
 		http.Error(w, "Pairing temporarily unavailable", http.StatusServiceUnavailable)
 	}
 }
 
 func respond(w http.ResponseWriter, value any) {
-	w.Header().Set("Content-Type", "application/json")
 	// Encode into a buffer to avoid writing an incomplete response on errors.
 	var b bytes.Buffer
 	if err := json.NewEncoder(&b).Encode(value); err != nil {
 		http.Error(w, "Unable to encode response", http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(b.Bytes())
 }
 
-func (h *handler) claim(w http.ResponseWriter, r *http.Request) {
+// request registers the device's key and answers with the device's secret
+// token and the code to show. The code is useless without a guardian.
+func (h *handler) request(w http.ResponseWriter, r *http.Request) {
 	securityHeaders(w)
 	input, ok := readRequest(w, r)
 	if !ok {
 		return
 	}
 	public, okPub := decode(input.PublicKey, 512)
-	sig, okSig := decode(input.Signature, 256)
-	if !okPub || !okSig {
-		http.Error(w, "Invalid public key or signature", http.StatusBadRequest)
+	if !okPub || input.Token != "" || input.Signature != "" {
+		http.Error(w, "Invalid pairing request", http.StatusBadRequest)
 		return
 	}
-	fingerprint, err := h.store.Claim(input.Token, input.Name, public, sig)
+	token, code, err := h.store.Request(input.Name, public)
 	if err != nil {
 		pairingError(w, err)
 		return
 	}
-	respond(w, map[string]string{"fingerprint": fingerprint})
+	respond(w, struct {
+		Token     string `json:"token"`
+		Code      string `json:"code"`
+		ExpiresIn int    `json:"expires_in"`
+	}{token, code, lifetime})
 }
 
 func (h *handler) nonce(w http.ResponseWriter, r *http.Request) {
 	securityHeaders(w)
-	input, ok := readRequest(w, r)
+	input, ok := tokenRequest(w, r)
 	if !ok {
 		return
 	}
@@ -218,7 +211,7 @@ func (h *handler) nonce(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) finish(w http.ResponseWriter, r *http.Request) {
 	securityHeaders(w)
-	input, ok := readRequest(w, r)
+	input, ok := tokenRequest(w, r)
 	if !ok {
 		return
 	}

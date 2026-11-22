@@ -1,27 +1,44 @@
 "use strict";
 
-// Yapuno child pairing prototype. Never export private keys or log invite tokens.
+// Yapuno device pairing. The device creates a key that cannot be exported,
+// asks the server for a short code and shows it. A guardian enters the code
+// in the guardian area; then the device proves its key and is bound.
+// The private key never leaves the browser; the token is never logged.
 (() => {
   const status = document.getElementById("status");
-  const form = document.getElementById("join");
-  const nameField = document.getElementById("device-name");
-  const button = document.getElementById("join-button");
-  const confirmation = document.getElementById("confirmation");
-  const fingerprint = document.getElementById("fingerprint");
-  const check = document.getElementById("check");
+  const waiting = document.getElementById("waiting");
+  const codeBox = document.getElementById("code");
   const completed = document.getElementById("completed");
+  const failed = document.getElementById("failed");
+  const failedReason = document.getElementById("failed-reason");
+  const again = document.getElementById("again");
+  const paired = document.getElementById("paired");
+  const anyway = document.getElementById("anyway");
+  if (!status || !waiting || !codeBox || !completed || !failed || !again || !paired || !anyway) return;
 
-  // The invite is in the URL *fragment*, which browsers do not send in HTTP
-  // requests. Remove it from the visible URL immediately after reading it.
-  const token = location.hash.startsWith("#") ? location.hash.slice(1) : "";
-  history.replaceState(null, "", location.pathname);
-  const validToken = /^[A-Za-z0-9_-]{43}$/.test(token);
+  const POLL_MS = 2500;
   let keyPair = null;
   let storeKey = null;
-  let pollTimer = null;
+  let token = null;
+  let timer = null;
+  let deadline = 0;
   let inFlight = false;
 
-  function display(message) { status.textContent = message; }
+  function say(message) { status.textContent = message; }
+  function show(section) {
+    for (const s of [waiting, completed, failed, paired]) s.hidden = s !== section;
+  }
+  function fail(reason) {
+    stop();
+    token = null;
+    say("");
+    failedReason.textContent = reason;
+    show(failed);
+  }
+  function stop() {
+    if (timer) window.clearInterval(timer);
+    timer = null;
+  }
   function url64(bytes) {
     const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     let binary = "";
@@ -44,7 +61,17 @@
     const s = integer(bytes.slice(32, 64));
     return new Uint8Array([48, r.length + s.length, ...r, ...s]);
   }
-  async function request(path, payload) {
+  // A name the guardian recognizes in the device list. Nothing is typed.
+  function deviceName() {
+    const ua = navigator.userAgent || "";
+    if (/iPhone/.test(ua)) return "iPhone";
+    if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "iPad";
+    if (/Android/.test(ua)) return /Mobile/.test(ua) ? "Android-Handy" : "Android-Tablet";
+    if (/Macintosh/.test(ua)) return "Mac";
+    if (/Windows/.test(ua)) return "Windows-PC";
+    return "Gerät";
+  }
+  async function post(path, payload) {
     // No "mode: same-origin" here: with it, and the page's Referrer-Policy
     // no-referrer, the Fetch standard makes Safari and Firefox send
     // "Origin: null". The URL is a fixed same-origin path and redirects are
@@ -56,13 +83,10 @@
       body: JSON.stringify(payload)
     });
     let data = {};
-    try { data = await response.json(); } catch (_) { /* generic error */ }
-    if (response.status !== 200 && response.status !== 202) {
-      throw new Error("Server hat die Kopplung abgelehnt (HTTP " + response.status + ").");
-    }
-    return {response, data};
+    try { data = await response.json(); } catch (_) { /* no JSON body */ }
+    return {status: response.status, data};
   }
-  async function openKeyStore() {
+  function openKeyStore() {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open("yapuno-pairing-v1", 1);
       req.onupgradeneeded = () => req.result.createObjectStore("devices");
@@ -84,86 +108,94 @@
       db.close();
     }
   }
-  async function signature(domain, payload) {
+  async function hasPairedDevice() {
+    const db = await openKeyStore();
+    try {
+      const all = await new Promise((resolve, reject) => {
+        const req = db.transaction("devices", "readonly").objectStore("devices").getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+      return all.some(d => d && d.privateKey && typeof d.deviceId === "string" && d.deviceId !== "");
+    } finally {
+      db.close();
+    }
+  }
+  async function sign(domain, payload) {
     const message = new TextEncoder().encode(domain + "\0" + payload);
     const raw = await crypto.subtle.sign({name: "ECDSA", hash: "SHA-256"}, keyPair.privateKey, message);
     return url64(fromRawECDSA(raw));
   }
-  function stopPolling() {
-    if (pollTimer) window.clearInterval(pollTimer);
-    pollTimer = null;
-  }
-  async function checkApproval() {
-    if (inFlight || !keyPair || !token) return;
+
+  async function check() {
+    if (inFlight || !token) return;
+    if (Date.now() > deadline) {
+      fail("Der Code ist abgelaufen. Lass dir einen neuen anzeigen.");
+      return;
+    }
     inFlight = true;
     try {
-      const {response, data} = await request("/pair/nonce", {token});
-      if (response.status === 202) {
-        display("Warte auf die Freigabe deiner Eltern …");
-        return;
-      }
-      if (!data.nonce || !/^[A-Za-z0-9_-]{43}$/.test(data.nonce)) {
-        throw new Error("Ungültige Antwort vom Server.");
-      }
-      stopPolling();
-      display("Freigabe erhalten! Gerät wird verknüpft …");
-      const proof = await signature("yapuno-pair-finish-v1", data.nonce);
-      const result = await request("/pair/finish", {token, signature: proof});
-      if (!result.data.device_id) throw new Error("Gerätekennung fehlt.");
-      await storeDevice(storeKey, {privateKey: keyPair.privateKey, publicKey: keyPair.publicKey, deviceId: result.data.device_id});
-      confirmation.hidden = true;
-      completed.hidden = false;
-      display("Gerät erfolgreich verbunden.");
-    } catch (error) {
-      stopPolling();
-      display(error.message || "Gerät konnte nicht verbunden werden.");
+      const answer = await post("/pair/nonce", {token});
+      if (answer.status === 202) return;
+      if (answer.status === 410) { fail("Der Code ist abgelaufen. Lass dir einen neuen anzeigen."); return; }
+      if (answer.status === 409) { fail("Diese Verbindung wurde abgebrochen. Lass dir einen neuen Code anzeigen."); return; }
+      if (answer.status !== 200) return; // keep the code; try again shortly
+      if (!/^[A-Za-z0-9_-]{43}$/.test(answer.data.nonce || "")) throw new Error("bad nonce");
+      stop();
+      say("Deine Eltern haben zugestimmt. Gerät wird verbunden …");
+      const done = await post("/pair/finish", {token, signature: await sign("yapuno-pair-finish-v1", answer.data.nonce)});
+      if (done.status !== 200 || !done.data.device_id) throw new Error("finish " + done.status);
+      await storeDevice(storeKey, {privateKey: keyPair.privateKey, publicKey: keyPair.publicKey, deviceId: done.data.device_id});
+      token = null;
+      say("");
+      show(completed);
+    } catch (_) {
+      fail("Das Gerät konnte nicht verbunden werden. Lass dir einen neuen Code anzeigen.");
     } finally {
       inFlight = false;
     }
   }
 
-  if (!validToken || !globalThis.isSecureContext || !crypto.subtle || !globalThis.indexedDB) {
-    display("Dieser Einladungslink ist ungültig oder dein Browser unterstützt die sichere Kopplung nicht.");
-    return;
-  }
-  form.hidden = false;
-  display("Einladung bereit. Gib dem Gerät einen Namen.");
-
-  form.addEventListener("submit", async event => {
-    event.preventDefault();
-    if (keyPair) return;
-    const name = nameField.value.trim();
-    if (!name || name.length > 64 || /[<>\r\n]/.test(name)) {
-      display("Bitte einen gültigen Gerätenamen eingeben.");
-      return;
-    }
-    button.disabled = true;
-    display("Ein sicherer Geräteschlüssel wird erzeugt …");
+  async function begin() {
+    stop();
+    show(null);
+    say("Dein Gerät wird vorbereitet …");
     try {
-      // The private key is non-extractable; the public key is shared.
+      // The private key is non-extractable; only the public key is shared.
       keyPair = await crypto.subtle.generateKey({name: "ECDSA", namedCurve: "P-256"}, false, ["sign", "verify"]);
       const spki = await crypto.subtle.exportKey("spki", keyPair.publicKey);
-      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
-      storeKey = url64(digest);
-      // Fail closed if non-extractable CryptoKey storage is unavailable.
+      storeKey = url64(crypto.getRandomValues(new Uint8Array(16)));
+      // Fail closed if the browser cannot keep a non-extractable key.
       await storeDevice(storeKey, {privateKey: keyPair.privateKey, publicKey: keyPair.publicKey, deviceId: null});
-      const proof = await signature("yapuno-pair-claim-v1", token);
-      const result = await request("/pair/claim", {
-        token, name, public_key: url64(spki), signature: proof
-      });
-      if (!/^[a-f0-9]{64}$/.test(result.data.fingerprint || "")) {
-        throw new Error("Ungültiger Geräte-Fingerabdruck.");
+      const answer = await post("/pair/request", {name: deviceName(), public_key: url64(spki)});
+      if (answer.status === 503) { fail("Gerade verbinden sich sehr viele Geräte. Versuch es in einer Minute nochmal."); return; }
+      if (answer.status !== 200 || !/^[0-9]{6}$/.test(answer.data.code || "") || !/^[A-Za-z0-9_-]{43}$/.test(answer.data.token || "")) {
+        throw new Error("request " + answer.status);
       }
-      fingerprint.textContent = result.data.fingerprint.match(/.{1,8}/g).join(" ");
-      form.hidden = true;
-      confirmation.hidden = false;
-      display("Bitte deine Eltern den Fingerabdruck prüfen lassen.");
-      pollTimer = window.setInterval(checkApproval, 3000);
-    } catch (error) {
-      keyPair = null;
-      button.disabled = false;
-      display(error.message || "Kopplung fehlgeschlagen.");
+      token = answer.data.token;
+      deadline = Date.now() + (Number(answer.data.expires_in) || 300) * 1000;
+      // Shown as text in two groups of three, like a phone code.
+      codeBox.textContent = answer.data.code.slice(0, 3) + " " + answer.data.code.slice(3);
+      say("");
+      show(waiting);
+      timer = window.setInterval(check, POLL_MS);
+    } catch (_) {
+      fail("Das Gerät konnte nicht vorbereitet werden. Prüfe die Internetverbindung und versuch es nochmal.");
     }
+  }
+
+  again.addEventListener("click", begin);
+  anyway.addEventListener("click", begin);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") check(); });
+
+  if (!globalThis.isSecureContext || !globalThis.crypto || !crypto.subtle || !globalThis.indexedDB) {
+    fail("Dieser Browser unterstützt die sichere Verbindung nicht. Probier einen aktuellen Browser.");
+    again.hidden = true;
+    return;
+  }
+  hasPairedDevice().then(yes => {
+    if (yes) { say(""); show(paired); } else { begin(); }
+  }).catch(() => {
+    fail("Der sichere Speicher dieses Browsers ist nicht verfügbar. Im privaten Modus funktioniert das Verbinden nicht.");
   });
-  check.addEventListener("click", checkApproval);
 })();

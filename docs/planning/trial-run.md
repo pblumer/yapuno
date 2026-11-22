@@ -71,7 +71,7 @@ Note for each step: device, operating system and browser, what happened, and any
 1. Each guardian requests a sign-in link, receives it and signs in. *Note how long the e-mail took and whether it landed in spam.*
 2. Each guardian sees only their own child on **Familie**.
 3. Each guardian chooses a theme and figure under **Mein Look**.
-4. Each guardian opens **Geräte von …** on the child's card, creates a pairing code, and the child's phone scans the QR code with its normal camera. The fingerprints match, the guardian approves, the child lands on **Hoi …!**.
+4. The child's phone opens `<host>/pair` and shows a code of six digits. The guardian opens **Geräte von …** on the child's card and types the code. The phone finishes by itself; **Yapuno öffnen** leads to **Hoi …!**. *Did anybody need help? How long did it take?*
 5. The child adds the page to the home screen and opens it from there. *Is the child still signed in? After closing and reopening? After an hour? The next day?*
 
 ### B. Contact and first hello

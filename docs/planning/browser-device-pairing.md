@@ -1,5 +1,7 @@
 # Browser device pairing: child key and guardian approval
 
+> **Superseded.** Pairing now works with a short code that the device shows and the guardian types; the QR link, the scanner and the fingerprint comparison described here were removed. See [device pairing](device-pairing.md). This note is kept as history.
+
 **Status:** End-to-end QR-or-link browser engineering preview for synthetic
 child profiles. The guardian QR image is created locally; children can scan
 using the native phone camera or the optional in-browser scanner. Browser camera
