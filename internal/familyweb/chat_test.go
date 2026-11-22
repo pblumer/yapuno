@@ -413,3 +413,33 @@ func TestGuardianChatServesTheSharedScriptsAndNeedsItsDependencies(t *testing.T)
 		t.Errorf("without looks: %d", w.Code)
 	}
 }
+
+func TestGuardianChatAcceptsBrowsersThatSendANullOrigin(t *testing.T) {
+	cw := newChatWorld(t)
+	h := cw.pages(t, testAuth{session: sessionA})
+	id := cw.thread(t, sessionA, guardianchat.Family)
+	// Safari and every browser on an iPhone: Origin "null", fetch metadata set.
+	webkit := func(r *http.Request) {
+		r.Header.Set("Origin", "null")
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+	}
+	if w := chatAPI(h, id, sessionA.CSRFToken, map[string]string{"client_id": "web-client-id-000101", "body": "Hoi vom iPhone"}, webkit); w.Code != http.StatusCreated {
+		t.Fatalf("send from an iPhone refused: %d %s", w.Code, w.Body)
+	}
+	for name, mutate := range map[string]func(*http.Request){
+		"bare null origin":             func(r *http.Request) { r.Header.Set("Origin", "null") },
+		"null origin, cross-site":      func(r *http.Request) { r.Header.Set("Origin", "null"); r.Header.Set("Sec-Fetch-Site", "cross-site") },
+		"right origin, cross-site":     func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") },
+		"right origin, same-site only": func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "same-site") },
+	} {
+		if w := chatAPI(h, id, sessionA.CSRFToken, map[string]string{"client_id": "web-client-id-000102", "body": "x"}, mutate); w.Code != http.StatusForbidden {
+			t.Errorf("%s: %d", name, w.Code)
+		}
+	}
+	if w := chatAPI(h, id, "", map[string]string{"client_id": "web-client-id-000103", "body": "x"}, webkit); w.Code != http.StatusForbidden {
+		t.Errorf("without CSRF token: %d", w.Code)
+	}
+	if got, _ := cw.chat.Recent(guardianchat.Guardian("tenant-a", "guardian-a"), id, 10); len(got) != 1 {
+		t.Fatalf("stored: %d", len(got))
+	}
+}

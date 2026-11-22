@@ -231,3 +231,43 @@ func (cw *chatWorld) post2(path string, values url.Values, cookie *http.Cookie) 
 	cw.handler.ServeHTTP(rec, r)
 	return rec
 }
+
+// webkit is what Safari and every browser on an iPhone send for scripted
+// requests from these pages: they set Referrer-Policy no-referrer, so the
+// Origin header is "null" and only fetch metadata names the source.
+func webkit(r *http.Request) {
+	r.Header.Set("Origin", "null")
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+}
+
+func TestChildSignInAndChatAcceptBrowsersThatSendANullOrigin(t *testing.T) {
+	cw := newChatWorld(t)
+	// Sign-in: the challenge is the first scripted request of a paired device.
+	if rec := cw.post("/child/session/challenge", map[string]string{"device_id": cw.alexDeviceID}, webkit); rec.Code != http.StatusOK {
+		t.Fatalf("challenge from an iPhone refused: %d %s", rec.Code, rec.Body)
+	}
+	bare := func(r *http.Request) { r.Header.Set("Origin", "null") }
+	if rec := cw.post("/child/session/challenge", map[string]string{"device_id": cw.alexDeviceID}, bare); rec.Code != http.StatusForbidden {
+		t.Fatalf("challenge with a bare null origin: %d", rec.Code)
+	}
+	crossSite := func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") }
+	if rec := cw.post("/child/session/challenge", map[string]string{"device_id": cw.alexDeviceID}, crossSite); rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-site challenge with the right origin: %d", rec.Code)
+	}
+	// Chat: the scripted send.
+	csrf := cw.csrf(t, cw.alex)
+	payload := map[string]string{"client_id": clientID(900), "body": "Hoi vom iPhone"}
+	if rec := cw.apiSend(apiOptions{cookie: cw.alex, csrf: csrf, mutate: webkit}, payload); rec.Code != http.StatusCreated {
+		t.Fatalf("send from an iPhone refused: %d %s", rec.Code, rec.Body)
+	}
+	if rec := cw.apiSend(apiOptions{cookie: cw.alex, csrf: csrf, mutate: bare}, map[string]string{"client_id": clientID(901), "body": "x"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("send with a bare null origin: %d", rec.Code)
+	}
+	if rec := cw.apiSend(apiOptions{cookie: cw.alex, csrf: csrf, mutate: crossSite}, map[string]string{"client_id": clientID(902), "body": "x"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-site send with the right origin: %d", rec.Code)
+	}
+	// The session token is still required: metadata is no substitute for it.
+	if rec := cw.apiSend(apiOptions{cookie: cw.alex, mutate: webkit}, map[string]string{"client_id": clientID(903), "body": "x"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("send without CSRF token: %d", rec.Code)
+	}
+}

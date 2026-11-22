@@ -16,6 +16,7 @@ import (
 	"github.com/pblumer/yapuno/internal/authz"
 	"github.com/pblumer/yapuno/internal/chatpage"
 	"github.com/pblumer/yapuno/internal/guardianchat"
+	"github.com/pblumer/yapuno/internal/sameorigin"
 )
 
 // GuardianChat stores the conversations in which a guardian takes part. It
@@ -324,7 +325,7 @@ func (h *chatHandler) sendJSON(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if r.Header.Get("Origin") != "https://"+r.Host {
+	if !sameorigin.Request(r) {
 		chatpage.JSONError(w, http.StatusForbidden, "origin")
 		return
 	}

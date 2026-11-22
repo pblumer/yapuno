@@ -91,8 +91,12 @@
     let status = 0;
     let data = null;
     try {
+      // No "mode: same-origin" here: with it, and the page's Referrer-Policy
+      // no-referrer, the Fetch standard makes Safari and Firefox send
+      // "Origin: null". The URL is a fixed same-origin path and redirects are
+      // refused, so the request cannot leave this origin either way.
       const response = await fetch(base, {
-        method: "POST", mode: "same-origin", credentials: "same-origin", cache: "no-store", redirect: "error",
+        method: "POST", credentials: "same-origin", cache: "no-store", redirect: "error",
         headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf},
         body: JSON.stringify({client_id: id, body})
       });

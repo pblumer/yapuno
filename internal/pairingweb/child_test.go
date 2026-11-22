@@ -176,3 +176,68 @@ func TestPairingRoutesAndUnsafeInput(t *testing.T) {
 		t.Fatalf("invalid key accepted: %d", w.Code)
 	}
 }
+
+// apiWith is api with explicit request headers.
+func apiWith(t *testing.T, handler http.Handler, path string, payload any, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "https://app.example.org"+path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	return w
+}
+
+// webkit is what Safari and every browser on an iPhone send for these
+// requests: the pages set Referrer-Policy no-referrer, so Origin is "null".
+var webkit = map[string]string{"Origin": "null", "Sec-Fetch-Site": "same-origin"}
+
+func TestPairingAcceptsBrowsersThatSendANullOrigin(t *testing.T) {
+	store, err := devicepairing.Open(filepath.Join(t.TempDir(), "pairing.json"), testFamily{}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := store.Start("parent", "tenant", "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, err := x509.MarshalPKIXPublicKey(&private.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := request{Token: token, Name: "iPhone", PublicKey: base64.RawURLEncoding.EncodeToString(public), Signature: sign(t, private, "yapuno-pair-claim-v1\x00", token)}
+	for name, headers := range map[string]map[string]string{
+		"null origin without metadata":   {"Origin": "null"},
+		"null origin from another site":  {"Origin": "null", "Sec-Fetch-Site": "cross-site"},
+		"right origin from another site": {"Origin": "https://app.example.org", "Sec-Fetch-Site": "cross-site"},
+		"metadata from a sibling host":   {"Sec-Fetch-Site": "same-site"},
+	} {
+		if w := apiWith(t, handler, "/pair/claim", payload, headers); w.Code != http.StatusForbidden {
+			t.Errorf("%s: %d", name, w.Code)
+		}
+	}
+	if w := apiWith(t, handler, "/pair/claim", payload, webkit); w.Code != http.StatusOK {
+		t.Fatalf("claim from an iPhone refused: %d %s", w.Code, w.Body)
+	}
+	// The later steps use the same check.
+	if w := apiWith(t, handler, "/pair/nonce", request{Token: token}, webkit); w.Code != http.StatusAccepted {
+		t.Fatalf("status check from an iPhone: %d %s", w.Code, w.Body)
+	}
+	if w := apiWith(t, handler, "/pair/nonce", request{Token: token}, map[string]string{"Origin": "null"}); w.Code != http.StatusForbidden {
+		t.Fatalf("status check with a bare null origin: %d", w.Code)
+	}
+}

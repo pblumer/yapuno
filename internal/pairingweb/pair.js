@@ -45,8 +45,12 @@
     return new Uint8Array([48, r.length + s.length, ...r, ...s]);
   }
   async function request(path, payload) {
+    // No "mode: same-origin" here: with it, and the page's Referrer-Policy
+    // no-referrer, the Fetch standard makes Safari and Firefox send
+    // "Origin: null". The URL is a fixed same-origin path and redirects are
+    // refused, so the request cannot leave this origin either way.
     const response = await fetch(path, {
-      method: "POST", mode: "same-origin", credentials: "omit",
+      method: "POST", credentials: "omit",
       cache: "no-store", redirect: "error",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload)
