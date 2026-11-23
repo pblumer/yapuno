@@ -30,6 +30,7 @@ All state lives in one private directory (mode `0700`). The two required files a
 | `YAPUNO_REPORTS_FILE` | reporting, e-mail notice, reminders | messages |
 | `YAPUNO_GUARDIAN_LOCKS_FILE` | emergency lock of a guardian's access | |
 | `YAPUNO_GUARDIAN_CHAT_FILE` | guardians chat with their own children and with guardians of connected families ([details](guardian-chat.md)) | |
+| `YAPUNO_GUARDIAN_NAMES_FILE` | guardians choose a name for their own children and one for other parents ([details](guardian-names.md)) | guardian chat |
 | `YAPUNO_GUARDIAN_SESSIONS_FILE` | guardians can stay signed in on a device for 30 days, also across restarts ([details](guardian-sessions.md#staying-signed-in-on-a-device-optional)) | |
 | `YAPUNO_SIGNUP_FILE` | optional: families register through an invitation and create child profiles ([details](invited-self-registration.md)); guardianship is then self-declared | |
 

@@ -23,6 +23,7 @@ import (
 	"github.com/pblumer/yapuno/internal/guardianchat"
 	"github.com/pblumer/yapuno/internal/guardiandirectory"
 	"github.com/pblumer/yapuno/internal/guardianlock"
+	"github.com/pblumer/yapuno/internal/guardiannames"
 	"github.com/pblumer/yapuno/internal/guardiansession"
 	"github.com/pblumer/yapuno/internal/messages"
 	"github.com/pblumer/yapuno/internal/reports"
@@ -158,6 +159,9 @@ type securityServer struct {
 	everything bool
 	looks      *appearance.Store
 	reports    *reports.Store
+	// namesPath lets guardians choose the names they are shown by.
+	namesPath string
+	names     *guardiannames.Store
 	// sessionsPath makes guardians able to stay signed in; every start then
 	// uses a fresh session manager that reads this file.
 	sessionsPath string
@@ -260,6 +264,13 @@ func (s *securityServer) start(withLocks bool) {
 			}
 			opt.reports = s.reports
 		}
+	}
+	if s.namesPath != "" {
+		var err error
+		if s.names, err = guardiannames.Open(s.namesPath); err != nil {
+			s.t.Fatal(err)
+		}
+		opt.guardianNames = s.names
 	}
 	if s.sessionsPath != "" {
 		sessions, err := guardiansession.New(time.Now, guardianSessionLifetime)

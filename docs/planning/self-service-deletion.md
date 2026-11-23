@@ -46,6 +46,7 @@ The last family of an installation cannot be deleted; the page says so.
 | | the guardians' identities: no sign-in link is sent any more, and the addresses can register again with a new invitation |
 | | all sessions of the guardians, remembered ones included, and unused sign-in links |
 | | the guardians' emergency locks |
+| | the [names](guardian-names.md) the guardians chose |
 
 ## What is not deleted
 
