@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pblumer/yapuno/internal/appearance"
 	"github.com/pblumer/yapuno/internal/authz"
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/devicepairing"
@@ -24,6 +25,7 @@ import (
 	"github.com/pblumer/yapuno/internal/guardianlock"
 	"github.com/pblumer/yapuno/internal/guardiansession"
 	"github.com/pblumer/yapuno/internal/messages"
+	"github.com/pblumer/yapuno/internal/reports"
 	"github.com/pblumer/yapuno/internal/signup"
 )
 
@@ -151,6 +153,11 @@ type securityServer struct {
 	mailer    *noticeMailer
 	handler   http.Handler
 	lockPath  string
+	// everything additionally opens the stores for looks and reports, so
+	// that a deletion can be followed through all of them.
+	everything bool
+	looks      *appearance.Store
+	reports    *reports.Store
 	// sessionsPath makes guardians able to stay signed in; every start then
 	// uses a fresh session manager that reads this file.
 	sessionsPath string
@@ -240,6 +247,19 @@ func (s *securityServer) start(withLocks bool) {
 		chat := s.guardianChat
 		s.t.Cleanup(func() { _ = chat.Close() })
 		opt.contacts, opt.messages, opt.guardianChat = s.contacts, s.messages, s.guardianChat
+	}
+	if s.everything {
+		var err error
+		if s.looks, err = appearance.Open(filepath.Join(s.root, "appearance.json")); err != nil {
+			s.t.Fatal(err)
+		}
+		opt.appearance = s.looks
+		if s.messages != nil {
+			if s.reports, err = reports.Open(filepath.Join(s.root, "reports.json"), s.messages, s.families, time.Now); err != nil {
+				s.t.Fatal(err)
+			}
+			opt.reports = s.reports
+		}
 	}
 	if s.sessionsPath != "" {
 		sessions, err := guardiansession.New(time.Now, guardianSessionLifetime)

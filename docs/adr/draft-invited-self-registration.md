@@ -57,7 +57,7 @@ Chosen options (product owner decisions of 2026-11-21): registration only throug
   - An invited person can enter someone else's address, who then receives one unexpected mail; the limits bound the volume, not the possibility.
   - A crash between the steps of completion can leave a family record nobody can sign in to and a spent invitation. The inviter creates a new invitation; the orphan needs operator cleanup.
   - The application now writes the guardian directory, which was operator-only. Offline provisioning must stop the server first (as before for the family store).
-  - There is no self-service to delete a family, remove a child or change the address.
+  - There is no self-service to change the address or to remove a single guardian. Deleting a child or the whole family is proposed separately ([ADR draft](draft-self-service-deletion.md)).
 - Open questions and review gates:
   - **Verification of guardianship** for real children: which evidence, who checks it, and whether invited registration may then only create an *unverified* family with reduced abilities until checked.
   - Whether contact approval between two unverified families is acceptable, and what children and guardians are told about it.

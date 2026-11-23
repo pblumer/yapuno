@@ -34,3 +34,21 @@ func TestLoginPageConfirmsSignOutWithFixedTextsOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestLoginPageConfirmsADeletedFamily(t *testing.T) {
+	h, _, _, _, _ := harness(t)
+	page := func(query string) string {
+		w := httptest.NewRecorder()
+		h.Routes().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "https://yapuno.example.org/login"+query, nil))
+		return w.Body.String()
+	}
+	done := page("?notice=family-deleted")
+	if !strings.Contains(done, `role="status"`) || !strings.Contains(done, "Familie ist gelöscht") || !strings.Contains(done, "abgemeldet") || strings.Contains(done, "Betreiber") {
+		t.Fatalf("deleted: %s", done)
+	}
+	// If something could not be removed the guardian is told whom to ask.
+	left := page("?notice=family-deleted-incomplete")
+	if !strings.Contains(left, `role="status"`) || !strings.Contains(left, "Familie ist gelöscht") || !strings.Contains(left, "Betreiber") {
+		t.Fatalf("leftovers: %s", left)
+	}
+}

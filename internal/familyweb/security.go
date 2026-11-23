@@ -45,6 +45,8 @@ type SecurityOptions struct {
 	Locker  AccessLocker      // nil: no emergency lock
 	Devices ChildDeviceLocker // nil: the lock cannot also lock child devices
 	Looks   AppearanceStore   // nil: classic skin
+	// DeleteFamily links to "Familie löschen" (NewDeletePages).
+	DeleteFamily bool
 }
 
 // NewSecurityPages serves sign-out, sign-out everywhere and the emergency
@@ -95,6 +97,9 @@ var securityPage = template.Must(template.New("security").Parse(securityHead + `
 </ul>
 <form method="post" action="/family/security/lock"><input type="hidden" name="csrf_token" value="{{.CSRF}}">{{if .DevicesEnabled}}<label class="yp-check"><input type="checkbox" name="devices" value="yes"> <span>Zusätzlich alle Geräte meiner Kinder sperren. Sinnvoll, wenn jemand Fremdes ein Gerät verbunden haben könnte. Neu verbinden kann sie danach nur ein Elternteil mit Zugang.</span></label>{{end}}<label class="yp-check"><input type="checkbox" name="confirm" value="yes" required> <span>Meinen Zugang sperren. Ich weiss, dass nur der Betreiber ihn wieder freigeben kann.</span></label><button class="yp-danger" type="submit">Meinen Zugang sperren</button></form>
 {{else}}<p class="yp-muted">Die Notfallsperre ist auf dieser Installation nicht eingerichtet. Melde dich überall ab, ändere das Passwort deines E-Mail-Postfachs und wende dich an den Betreiber.</p>{{end}}</section>
+{{if .DeleteFamily}}<section aria-labelledby="yp-delete"><h2 id="yp-delete">Familie löschen</h2>
+<p class="yp-muted">Entfernt alle Kinder, alle Elternteile und alles, was Yapuno über eure Familie gespeichert hat. Das lässt sich nicht rückgängig machen. Auf der nächsten Seite steht genau, was gelöscht wird; erst dort bestätigst du.</p>
+<p><a class="yp-back" href="/family/delete">Familie löschen</a></p></section>{{end}}
 <p class="yp-muted">Vorschau mit synthetischen Profilen.</p>
 </div></main></body></html>`))
 
@@ -147,7 +152,8 @@ func (h *securityHandler) view(w http.ResponseWriter, r *http.Request) {
 		CSS                         template.CSS
 		Count                       int
 		LockEnabled, DevicesEnabled bool
-	}{Skin: skinID, CSRF: p.CSRFToken, CSS: css, Count: h.sessions.Count(p.GuardianID, p.TenantID),
+		DeleteFamily                bool
+	}{DeleteFamily: h.opt.DeleteFamily, Skin: skinID, CSRF: p.CSRFToken, CSS: css, Count: h.sessions.Count(p.GuardianID, p.TenantID),
 		LockEnabled: h.opt.Locker != nil, DevicesEnabled: h.opt.Locker != nil && h.opt.Devices != nil})
 }
 

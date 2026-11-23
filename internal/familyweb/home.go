@@ -40,6 +40,7 @@ var homePage = template.Must(template.New("home").Parse(`<!doctype html><html la
 {{if .Devices}}<li><a href="/family/devices/lost?child_id={{.ID}}"><span>Gerät von {{.Name}} verloren?</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 </ul>{{end}}{{if not (or .Devices .Contacts)}}<p class="yp-muted">{{if .Full}}Geräte und Kontakte sind auf dieser Installation nicht eingeschaltet.{{else}}Für dieses Profil hast du keine Verwaltungsrechte.{{end}}</p>{{end}}
 {{if .Full}}<details><summary>Namen ändern</summary><form method="post" action="/family/rename"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="child_id" value="{{.ID}}"><label class="yp-field" for="yp-name-{{.N}}">Neuer Name für {{.Name}}</label><input type="text" id="yp-name-{{.N}}" name="name" value="{{.Name}}" required maxlength="40" autocomplete="off"><button class="yp-secondary" type="submit">Speichern</button></form></details>{{end}}
+{{if and .Full $.DeleteEnabled}}<p><a class="yp-back" href="/family/children/delete?child_id={{.ID}}">Profil von {{.Name}} löschen</a></p>{{end}}
 </section>{{else}}<section aria-labelledby="yp-none"><h2 id="yp-none">Noch kein Kind</h2><p class="yp-muted">Für dich ist kein Kinderprofil freigegeben.</p></section>{{end}}
 <section aria-labelledby="yp-family"><h2 id="yp-family">Familie</h2><ul class="yp-rows">
 {{if .ChatEnabled}}<li><a href="/family/chat"><span>Chats<small>Mit deinen Kindern und mit anderen Eltern schreiben</small></span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
@@ -63,12 +64,15 @@ var homePage = template.Must(template.New("home").Parse(`<!doctype html><html la
 // something they asked for.
 var (
 	homeNotices = map[string]string{
-		"connected": "Deine Familie ist angelegt und die Kinder sind verbunden. Verbinde als Nächstes das Gerät deines Kindes.",
+		"connected":     "Deine Familie ist angelegt und die Kinder sind verbunden. Verbinde als Nächstes das Gerät deines Kindes.",
+		"child-deleted": "Das Profil ist gelöscht.",
 	}
 	homeAlerts = map[string]string{
 		"unconnected": "Deine Familie ist angelegt, aber die Kinder wurden nicht verbunden. Verbindet sie unter «Kontakte» mit einem Code.",
 		// The guardian asked to stay signed in, and the session could not be stored.
-		"not-remembered": "Du bist angemeldet, aber nur für kurze Zeit: Die Anmeldung konnte auf diesem Gerät nicht gespeichert werden.",
+		// The profile is gone; a message log could not be rewritten yet.
+		"child-deleted-leftovers": "Das Profil ist gelöscht. Einzelne Chat-Nachrichten werden erst beim nächsten Aufräumen des Servers entfernt; lesen kann sie niemand mehr.",
+		"not-remembered":          "Du bist angemeldet, aber nur für kurze Zeit: Die Anmeldung konnte auf diesem Gerät nicht gespeichert werden.",
 	}
 )
 
@@ -150,7 +154,8 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 		DevicesEnabled, ContactsEnabled, ChatEnabled bool
 		LookEnabled, SecurityEnabled                 bool
 		CanAddChild, CanInvite, InviteConnects       bool
-	}{Alert: homeAlerts[r.URL.Query().Get("done")], Notice: homeNotices[r.URL.Query().Get("done")], Skin: def.ID, CSRF: p.CSRFToken, Inactive: strings.Join(h.inactive, ", "), Version: shortVersion(h.version),
+		DeleteEnabled                                bool
+	}{DeleteEnabled: h.deleteEnabled, Alert: homeAlerts[r.URL.Query().Get("done")], Notice: homeNotices[r.URL.Query().Get("done")], Skin: def.ID, CSRF: p.CSRFToken, Inactive: strings.Join(h.inactive, ", "), Version: shortVersion(h.version),
 		CSS: template.CSS(fonts + ".yp-page{" + decls + "}\n" + contactCSS + lostCSS + homeCSS), Figure: figure, Children: children,
 		DevicesEnabled: h.devicesEnabled, ContactsEnabled: h.contactsEnabled, ChatEnabled: h.chat != nil,
 		LookEnabled: h.looks != nil, SecurityEnabled: h.securityEnabled,

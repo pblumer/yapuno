@@ -39,7 +39,7 @@ From then on the guardian signs in at `/login` like every other guardian.
 - `signup.json` holds identifiers only: per invitation the inviting guardian and tenant, the named child if there is one, times, a counter, and after use the tenant that joined. Used invitations stay as the record of who invited whom. It contains no address, no name and no usable code.
 - The application now writes `guardians.json`. **Stop the server before running `yapuno-provision -add`**, as before.
 - To stop a registered guardian, set `"active": false` on their entry in `guardians.json`; it applies at once, also to their open invitations.
-- There is no self-service to delete a family or a child. Removing one means editing the files while the server is stopped.
+- A guardian deletes a child profile or the whole family in the application; see [deleting a child or a family](self-service-deletion.md). A single guardian cannot be removed there, and the operator has no command for it yet.
 - Put the reverse proxy's rate limit on `POST /join/request` as well as on `POST /login/request`.
 
 ## Known limits
