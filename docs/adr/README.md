@@ -25,3 +25,4 @@ Yapuno follows an Atlas-inspired ADR process. An ADR states **why** a choice is 
 - [Pairing a child device with a short code the guardian reads off the device](draft-device-pairing-by-code.md)
 - [An invitation to register may also connect the two families' children](draft-invitation-connects-children.md)
 - [A guardian may stay signed in on a device for thirty days](draft-guardian-remembered-sessions.md)
+- [Guardians delete a child profile or their whole family themselves](draft-self-service-deletion.md)

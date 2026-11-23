@@ -299,3 +299,35 @@ func (d *Directory) Register(email, guardianID, tenantID string) error {
 	}
 	return nil
 }
+
+// RemoveTenant deletes the identities of every guardian of one family and
+// returns how many there were. Their addresses can register again afterwards.
+// It is a trusted call for the deletion of a family: the caller must have
+// authorized it and must already have removed the family itself, because an
+// identity without a family cannot sign in anyway, while a family without
+// identities could never be deleted by its guardians.
+func (d *Directory) RemoveTenant(tenantID string) (int, error) {
+	if tenantID == "" || strings.ContainsAny(tenantID, "\x00\r\n") {
+		return 0, ErrInvalid
+	}
+	d.writes.Lock()
+	defer d.writes.Unlock()
+	entries, err := d.read()
+	if err != nil {
+		return 0, err
+	}
+	next := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		if e.TenantID != tenantID {
+			next = append(next, e)
+		}
+	}
+	removed := len(entries) - len(next)
+	if removed == 0 {
+		return 0, nil
+	}
+	if err := d.write(next); err != nil {
+		return 0, ErrUnavailable
+	}
+	return removed, nil
+}

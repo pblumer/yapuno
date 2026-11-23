@@ -117,6 +117,9 @@ func secureHeaders(w http.ResponseWriter) { publicpage.Headers(w) }
 var loginNotices = map[string]string{
 	"signed-out":            "Du bist abgemeldet.",
 	"signed-out-everywhere": "Du bist überall abgemeldet. Noch nicht benutzte Anmeldelinks sind ungültig.",
+	// Shown after a guardian deleted their own family.
+	"family-deleted":            "Eure Familie ist gelöscht. Du bist abgemeldet.",
+	"family-deleted-incomplete": "Eure Familie ist gelöscht und du bist abgemeldet. Einzelne Angaben konnten nicht entfernt werden; wende dich an den Betreiber dieser Yapuno-Installation.",
 }
 
 var loginForm = template.Must(template.New("login").Parse(publicpage.Open + `

@@ -22,6 +22,7 @@ import (
 	"github.com/pblumer/yapuno/internal/childweb"
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/devicepairing"
+	"github.com/pblumer/yapuno/internal/erasure"
 	"github.com/pblumer/yapuno/internal/familydashboard"
 	"github.com/pblumer/yapuno/internal/familystore"
 	"github.com/pblumer/yapuno/internal/familyweb"
@@ -283,6 +284,59 @@ func (c invitedContacts) Connect(inviterGuardian, inviterTenant, inviterChild, g
 	return err
 }
 
+// invitationsOfChild lets the deletion of one child reach the invitations
+// that name it. What a deleted family leaves in the invitation store is
+// removed later, once the family is gone.
+type invitationsOfChild struct{ invitations *signup.Store }
+
+func (i invitationsOfChild) PurgeChild(tenantID, childID string) error {
+	return i.invitations.PurgeChild(tenantID, childID)
+}
+
+func (invitationsOfChild) PurgeTenant(string) error { return nil }
+
+// newEraser assembles the deletion of a child or a family from the stores
+// this installation runs. The order is fixed by the erasure package: first
+// what a child acts with, then the profile, then identities and sessions,
+// then what restricts or records guardians, then the message logs.
+func newEraser(families *familystore.Store, directory *guardiandirectory.Directory, sessions *guardiansession.Manager, links *guardianlogin.Handler, opt optionalStores) (*erasure.Service, error) {
+	cfg := erasure.Config{
+		Families:   families,
+		Identities: directory,
+		SignOut: []func(guardianID, tenantID string){
+			func(g, t string) { sessions.RevokeAll(g, t) },
+			func(g, t string) { links.Cancel(g, t) },
+		},
+	}
+	// Assign only stores that exist: a typed nil would be a non-nil interface.
+	if opt.pairing != nil {
+		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "devices", Store: opt.pairing})
+	}
+	if opt.contacts != nil {
+		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "contacts", Store: opt.contacts})
+	}
+	if opt.reports != nil {
+		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "reports", Store: opt.reports})
+	}
+	if opt.appearance != nil {
+		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "looks", Store: opt.appearance})
+	}
+	if opt.signup != nil {
+		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "invitations naming the child", Store: invitationsOfChild{opt.signup}})
+		cfg.After = append(cfg.After, erasure.TenantDependent{Name: "invitations", Store: opt.signup})
+	}
+	if opt.guardianLocks != nil {
+		cfg.After = append(cfg.After, erasure.TenantDependent{Name: "locks", Store: opt.guardianLocks})
+	}
+	if opt.messages != nil {
+		cfg.Logs = append(cfg.Logs, erasure.Log{Name: "the children's chat", Log: opt.messages})
+	}
+	if opt.guardianChat != nil {
+		cfg.Logs = append(cfg.Logs, erasure.Log{Name: "the guardians' chat", Log: opt.guardianChat})
+	}
+	return erasure.New(cfg)
+}
+
 func newApp(origin string, store *familystore.Store, directory *guardiandirectory.Directory, sender guardianlogin.Sender, sessions *guardiansession.Manager, opt optionalStores) (*app, error) {
 	if store == nil || directory == nil || sender == nil || sessions == nil {
 		return nil, errors.New("missing trusted Yapuno dependency")
@@ -354,6 +408,9 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		}
 		registrationMailer = mailer
 		familyOptions.Children, familyOptions.InvitePages = store, true
+		// Guardians who create families and profiles themselves can also
+		// delete them.
+		familyOptions.DeletePages = true
 	}
 	family, err := familyweb.NewWithOptions(auth, store, familyOptions)
 	if err != nil {
@@ -372,7 +429,7 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 	mux.Handle("/family", familyRoutes)
 	mux.Handle("/family/", familyRoutes)
 	// Sign-out is always available; the emergency lock needs its store.
-	securityOptions := familyweb.SecurityOptions{Looks: looks}
+	securityOptions := familyweb.SecurityOptions{Looks: looks, DeleteFamily: opt.signup != nil}
 	if locker != nil {
 		securityOptions.Locker = locker
 		if opt.pairing != nil {
@@ -417,6 +474,16 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		}
 		mux.Handle("/family/invite", inviteRoutes)
 		mux.Handle("/family/invite/", inviteRoutes)
+		eraser, err := newEraser(store, directory, sessions, login, opt)
+		if err != nil {
+			return nil, err
+		}
+		deleteRoutes, err := familyweb.NewDeletePages(auth, eraser, store, store, sessions, looks)
+		if err != nil {
+			return nil, err
+		}
+		mux.Handle("/family/children/delete", deleteRoutes)
+		mux.Handle("/family/delete", deleteRoutes)
 	}
 	if opt.guardianChat != nil {
 		chatRoutes, err := familyweb.NewChatPages(auth, opt.guardianChat, store, looks)

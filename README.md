@@ -81,6 +81,18 @@ switch is for trials with synthetic profiles only. See
 [the flow and its limits](docs/planning/invited-self-registration.md) and the
 [proposed ADR](docs/adr/draft-invited-self-registration.md).
 
+## Deleting a child or a family (preview)
+
+Where invited self-registration is on, a guardian deletes a child profile, or
+the whole family with every child and every guardian, in the application. The
+page lists what goes and what stays, and asks the guardian to type the child's
+name or the word LÖSCHEN. Devices, contacts, chats, looks, reports, invitations,
+identities and sessions go with it; the addresses can register again.
+**It is immediate, cannot be undone, and one guardian decides for all.** A
+report another family filed about a message of the deleted child stays with
+that family. See [what is deleted and what is not](docs/planning/self-service-deletion.md)
+and the [proposed ADR](docs/adr/draft-self-service-deletion.md).
+
 ## Guardian chat and family overview (preview)
 
 With `YAPUNO_GUARDIAN_CHAT_FILE`, a guardian writes with their own children

@@ -62,7 +62,7 @@ yapuno-provision -verified -add -families private/families.json -guardians priva
 
 ### Alternative: let further families register themselves
 
-With `YAPUNO_SIGNUP_FILE` only the first family needs provisioning. Its guardian opens **Familie → Eine Familie einladen**, chooses whether one of their children should be connected, creates a link and passes it on; the invited person registers with their own address and the first child's name, and adds further children under **Weiteres Kind anlegen**. A second guardian for a child still needs `-add`. See [invited self-registration](invited-self-registration.md) for the limits, above all that guardianship is not checked.
+With `YAPUNO_SIGNUP_FILE` only the first family needs provisioning. Its guardian opens **Familie → Eine Familie einladen**, chooses whether one of their children should be connected, creates a link and passes it on; the invited person registers with their own address and the first child's name, and adds further children under **Weiteres Kind anlegen**. A second guardian for a child still needs `-add`. See [invited self-registration](invited-self-registration.md) for the limits, above all that guardianship is not checked. Test families and profiles can be removed again in the application: **Profil von … löschen** on a child's card and **Familie löschen** under **Sicherheit und Abmelden** ([what is deleted](self-service-deletion.md)); the addresses are free afterwards.
 
 ## Test script
 
