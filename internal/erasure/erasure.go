@@ -12,8 +12,9 @@
 //  3. The profile, or the family, is removed. From here on nobody can reach
 //     what may still be left.
 //  4. For a family: the guardians' identities are removed, the guardians are
-//     signed out, and then the records that restrict or describe guardians
-//     (invitations, locks). A lock stays if the identities could not be
+//     signed out, what merely describes them is purged (their names), and
+//     then the records that restrict them or tell how they came in
+//     (invitations, locks). Those stay if the identities could not be
 //     removed.
 //  5. The message logs drop the conversations whose relationship is gone.
 //
@@ -97,6 +98,8 @@ type Config struct {
 	SignOut []func(guardianID, tenantID string)
 	// Before are purged before the profile is removed.
 	Before []Dependent
+	// Records are purged once the family is gone, whatever else failed.
+	Records []TenantDependent
 	// After are purged once the family and its identities are gone.
 	After []TenantDependent
 	// Logs are compacted last.
@@ -118,7 +121,7 @@ func New(cfg Config) (*Service, error) {
 			return nil, errors.New("deletion: missing store")
 		}
 	}
-	for _, d := range cfg.After {
+	for _, d := range append(append([]TenantDependent{}, cfg.Records...), cfg.After...) {
 		if d.Store == nil {
 			return nil, errors.New("deletion: missing store")
 		}
@@ -216,13 +219,15 @@ func (s *Service) DeleteFamily(guardianID, tenantID string) error {
 			signOut(guardian, tenantID)
 		}
 	}
+	records := append([]TenantDependent{}, s.cfg.Records...)
 	// A lock protects against a guardian whose identity still exists.
 	if identitiesGone {
-		for _, d := range s.cfg.After {
-			if err := d.Store.PurgeTenant(tenantID); err != nil {
-				log.Printf("deletion of a family: %s could not be purged", d.Name)
-				clean = false
-			}
+		records = append(records, s.cfg.After...)
+	}
+	for _, d := range records {
+		if err := d.Store.PurgeTenant(tenantID); err != nil {
+			log.Printf("deletion of a family: %s could not be purged", d.Name)
+			clean = false
 		}
 	}
 	if !s.compact() {

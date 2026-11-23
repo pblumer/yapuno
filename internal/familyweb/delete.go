@@ -96,7 +96,7 @@ var deleteFamilyPage = template.Must(template.New("delete-family").Parse(deleteH
 <li>Die Profile aller Kinder eurer Familie: {{.Children}}.</li>
 <li>Der Zugang für alle Elternteile eurer Familie, auch für die, die gerade nicht angemeldet sind. Sie werden nicht gefragt und nicht benachrichtigt.</li>
 <li>Alle Geräte, Kontakte und Chats eurer Kinder, und eure Chats mit ihnen und mit anderen Eltern.</li>
-<li>Eure Looks, eure Meldungen und eure offenen Einladungen.</li>
+<li>Eure Looks und Namen, eure Meldungen und eure offenen Einladungen.</li>
 </ul>
 <p><strong>Das lässt sich nicht rückgängig machen.</strong></p></section>
 <section aria-labelledby="yp-know"><h2 id="yp-know">Gut zu wissen</h2><ul class="yp-facts">

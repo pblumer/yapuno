@@ -58,7 +58,7 @@ Chosen options (product owner decision of 2026-11-22: all three chat kinds in on
 - Negative / accepted trade-offs:
   - Two message stores exist with duplicated log mechanics. They should be unified once the role-aware model has been reviewed.
   - Approving a contact between children now also opens a channel between the guardians, which the approval page does not say yet.
-  - Guardians have no display name. A child with two guardians sees "Elternteil 1" and "Elternteil 2" with their figures.
+  - Guardians have no display name. A child with two guardians sees "Elternteil 1" and "Elternteil 2" with their figures. (A later draft proposes optional, self-chosen names: [guardian names](draft-guardian-names.md).)
   - A child cannot block or report a guardian. A child who needs protection from a guardian finds no help in the product.
   - No notification, unread marker or read receipt: a message is seen when the page is open.
   - Messages are plaintext on the server, as in the children's chat.

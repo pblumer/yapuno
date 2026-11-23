@@ -32,6 +32,7 @@ import (
 	"github.com/pblumer/yapuno/internal/guardianlock"
 	"github.com/pblumer/yapuno/internal/guardianlogin"
 	"github.com/pblumer/yapuno/internal/guardianmailer"
+	"github.com/pblumer/yapuno/internal/guardiannames"
 	"github.com/pblumer/yapuno/internal/guardiansession"
 	"github.com/pblumer/yapuno/internal/invitenotice"
 	"github.com/pblumer/yapuno/internal/messages"
@@ -82,6 +83,10 @@ type optionalStores struct {
 	// guardianChat lets guardians chat with their own children and with
 	// guardians of families whose children are connected to theirs.
 	guardianChat *guardianchat.Store
+	// guardianNames lets guardians choose a name for their own children and
+	// one for guardians of connected families. It needs guardianChat, the
+	// only place where these names are shown.
+	guardianNames *guardiannames.Store
 	// now is the clock for report notices and reminders; nil means time.Now.
 	now func() time.Time
 }
@@ -101,6 +106,7 @@ func (o optionalStores) inactive() []string {
 		{o.reports == nil, "Melden"},
 		{o.appearance == nil, "Mein Look"},
 		{o.guardianLocks == nil, "Notfallsperre"},
+		{o.guardianNames == nil, "Namen für Eltern"},
 		{o.signup == nil, "Registrierung per Einladung"},
 	} {
 		if f.off {
@@ -124,7 +130,11 @@ func (noDevices) ActiveDevice(string, string, string) (devicepairing.Device, boo
 
 // childThreads shows a child its conversations with its own guardians.
 // Guardians have no display names yet, so they are numbered in a stable order.
-type childThreads struct{ side guardianchat.ChildSide }
+type childThreads struct {
+	side guardianchat.ChildSide
+	// names is nil where guardians have no names.
+	names *guardiannames.Store
+}
 
 func childPrincipal(s childsession.Session) messages.Principal {
 	return messages.Principal{Party: contacts.Party{TenantID: s.TenantID, ChildID: s.ChildID}, DeviceID: s.DeviceID}
@@ -137,6 +147,12 @@ func (c childThreads) FamilyThreads(s childsession.Session) []childweb.FamilyThr
 		name := "Dein Elternteil"
 		if len(threads) > 1 {
 			name = "Elternteil " + strconv.Itoa(i+1)
+		}
+		// The name this guardian chose for their own children.
+		if c.names != nil {
+			if chosen := c.names.Get(t.Peer.TenantID, t.Peer.ID).ForChildren; chosen != "" {
+				name = chosen
+			}
 		}
 		out = append(out, childweb.FamilyThread{ID: t.ID, Name: name,
 			Guardian: appearance.Subject{Kind: appearance.KindGuardian, TenantID: t.Peer.TenantID, ID: t.Peer.ID}})
@@ -321,6 +337,9 @@ func newEraser(families *familystore.Store, directory *guardiandirectory.Directo
 	if opt.appearance != nil {
 		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "looks", Store: opt.appearance})
 	}
+	if opt.guardianNames != nil {
+		cfg.Records = append(cfg.Records, erasure.TenantDependent{Name: "guardian names", Store: opt.guardianNames})
+	}
 	if opt.signup != nil {
 		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "invitations naming the child", Store: invitationsOfChild{opt.signup}})
 		cfg.After = append(cfg.After, erasure.TenantDependent{Name: "invitations", Store: opt.signup})
@@ -351,6 +370,9 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 	}
 	if opt.reports != nil && opt.messages == nil {
 		return nil, errors.New("reports require messaging")
+	}
+	if opt.guardianNames != nil && opt.guardianChat == nil {
+		return nil, errors.New("guardian names require the guardian chat")
 	}
 	var locker *guardianlock.Locker
 	if opt.guardianLocks != nil {
@@ -390,6 +412,9 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 			return nil, err
 		}
 		familyOptions.Chat = opt.guardianChat
+		if opt.guardianNames != nil {
+			familyOptions.Names = opt.guardianNames
+		}
 	}
 	// Assign only a non-nil store: a typed nil pointer would be a non-nil interface.
 	var looks familyweb.AppearanceStore
@@ -461,6 +486,10 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 			joinConfig.Connections, joinConfig.ParentsChat = connections, parentsChat
 			inviteOptions.Connect, inviteOptions.ParentsChat = true, parentsChat
 		}
+		// The registering guardian may give a name for other adults.
+		if opt.guardianNames != nil {
+			joinConfig.Names = opt.guardianNames
+		}
 		join, err := signup.New(joinConfig)
 		if err != nil {
 			return nil, err
@@ -486,7 +515,17 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		mux.Handle("/family/delete", deleteRoutes)
 	}
 	if opt.guardianChat != nil {
-		chatRoutes, err := familyweb.NewChatPages(auth, opt.guardianChat, store, looks)
+		// Assign only a store that exists: a typed nil would be a non-nil interface.
+		var chosenNames familyweb.GuardianNames
+		if opt.guardianNames != nil {
+			chosenNames = opt.guardianNames
+			nameRoutes, err := familyweb.NewNamePages(auth, opt.guardianNames, looks)
+			if err != nil {
+				return nil, err
+			}
+			mux.Handle("/family/name", nameRoutes)
+		}
+		chatRoutes, err := familyweb.NewChatPagesWithNames(auth, opt.guardianChat, store, chosenNames, looks)
 		if err != nil {
 			return nil, err
 		}
@@ -575,7 +614,7 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		}
 		if opt.guardianChat != nil {
 			side := opt.guardianChat.ForChildren()
-			childOptions.Family = childThreads{side: side}
+			childOptions.Family = childThreads{side: side, names: opt.guardianNames}
 			childOptions.Messages = routedMessages{family: side, children: childOptions.Messages}
 		}
 		childPages, err := childweb.New(childSessions, store, childOptions)
@@ -608,6 +647,7 @@ func main() {
 	reportsPath := flag.String("reports", os.Getenv("YAPUNO_REPORTS_FILE"), "optional private file for messages children report to their guardians; requires messages")
 	guardianLocksPath := flag.String("guardian-locks", os.Getenv("YAPUNO_GUARDIAN_LOCKS_FILE"), "optional private file for emergency locks of guardian access")
 	guardianChatPath := flag.String("guardian-chat", os.Getenv("YAPUNO_GUARDIAN_CHAT_FILE"), "optional private log for chats of guardians with their own children and with guardians of connected families")
+	namesPath := flag.String("guardian-names", os.Getenv("YAPUNO_GUARDIAN_NAMES_FILE"), "optional private file for the names guardians choose to be shown by; requires the guardian chat")
 	sessionsPath := flag.String("guardian-sessions", os.Getenv("YAPUNO_GUARDIAN_SESSIONS_FILE"), "optional private file; lets guardians stay signed in on a device for 30 days, also across restarts")
 	signupPath := flag.String("signup", os.Getenv("YAPUNO_SIGNUP_FILE"), "optional private invitation file; switches invited self-registration on (guardianship is then self-declared)")
 	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
@@ -692,6 +732,16 @@ func main() {
 		}
 		defer guardianChatStore.Close()
 	}
+	var guardianNameStore *guardiannames.Store
+	if *namesPath != "" {
+		if guardianChatStore == nil {
+			log.Fatal("YAPUNO_GUARDIAN_NAMES_FILE requires YAPUNO_GUARDIAN_CHAT_FILE")
+		}
+		guardianNameStore, err = guardiannames.Open(*namesPath)
+		if err != nil {
+			log.Fatal("guardian names file unavailable, insecure or corrupt")
+		}
+	}
 	var signupStore *signup.Store
 	if *signupPath != "" {
 		signupStore, err = signup.Open(*signupPath, time.Now)
@@ -718,7 +768,7 @@ func main() {
 			log.Fatal("guardian session file unavailable, insecure or corrupt")
 		}
 	}
-	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore, guardianChat: guardianChatStore})
+	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore, guardianChat: guardianChatStore, guardianNames: guardianNameStore})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}

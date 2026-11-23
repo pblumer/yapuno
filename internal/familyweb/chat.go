@@ -16,6 +16,7 @@ import (
 	"github.com/pblumer/yapuno/internal/authz"
 	"github.com/pblumer/yapuno/internal/chatpage"
 	"github.com/pblumer/yapuno/internal/guardianchat"
+	"github.com/pblumer/yapuno/internal/guardiannames"
 	"github.com/pblumer/yapuno/internal/sameorigin"
 )
 
@@ -47,10 +48,24 @@ var threadPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // guardian is always the one of the session; no request names a participant.
 // These pages never show what children write to each other. looks may be nil.
 func NewChatPages(auth Authenticator, chat GuardianChat, names ChildNames, looks AppearanceStore) (http.Handler, error) {
+	return NewChatPagesWithNames(auth, chat, names, nil, looks)
+}
+
+// GuardianNames returns the names a guardian chose to be shown by. It is
+// not an authorization check: these pages ask only about guardians with whom
+// the session's guardian has a conversation.
+type GuardianNames interface {
+	Get(tenantID, guardianID string) guardiannames.Names
+}
+
+// NewChatPagesWithNames is NewChatPages that shows a guardian of a connected
+// family by the name that guardian chose for other adults, next to how the
+// two are related. guardians may be nil.
+func NewChatPagesWithNames(auth Authenticator, chat GuardianChat, names ChildNames, guardians GuardianNames, looks AppearanceStore) (http.Handler, error) {
 	if auth == nil || chat == nil || names == nil {
 		return nil, errors.New("authenticator, chat store and child names are required")
 	}
-	h := &chatHandler{auth: auth, chat: chat, names: names, looks: looks}
+	h := &chatHandler{auth: auth, chat: chat, names: names, guardians: guardians, looks: looks}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /family/chat", h.inbox)
 	mux.HandleFunc("GET /family/chat.js", chatAsset(chatpage.JS))
@@ -63,10 +78,11 @@ func NewChatPages(auth Authenticator, chat GuardianChat, names ChildNames, looks
 }
 
 type chatHandler struct {
-	auth  Authenticator
-	chat  GuardianChat
-	names ChildNames
-	looks AppearanceStore
+	auth      Authenticator
+	chat      GuardianChat
+	names     ChildNames
+	guardians GuardianNames // nil: guardians have no names
+	looks     AppearanceStore
 }
 
 // scriptHeaders is headers for the one page that runs the first-party chat
@@ -90,8 +106,11 @@ func actorOf(p Session) guardianchat.Actor {
 
 // threadView is how one conversation is shown to the guardian.
 type threadView struct {
-	ID       string
-	Name     string
+	ID   string
+	Name string
+	// Relation says how a named guardian is related to the reader. A name is
+	// what somebody chose to be called; the relation is what Yapuno knows.
+	Relation string
 	Subtitle string
 	Figure   template.HTML
 }
@@ -113,11 +132,17 @@ func (h *chatHandler) describe(t guardianchat.Thread, size int) threadView {
 				children = append(children, name)
 			}
 		}
-		v.Name = "Elternteil von " + strings.Join(children, " und ")
+		relation := "Elternteil von " + strings.Join(children, " und ")
 		if len(children) == 0 {
-			v.Name = "Elternteil einer verbundenen Familie"
+			relation = "Elternteil einer verbundenen Familie"
 		}
-		v.Subtitle = "Eure Kinder sind verbunden"
+		v.Name, v.Subtitle = relation, "Eure Kinder sind verbunden"
+		// The name this guardian chose for other adults never stands alone.
+		if h.guardians != nil {
+			if chosen := h.guardians.Get(t.Peer.TenantID, t.Peer.ID).ForAdults; chosen != "" {
+				v.Name, v.Relation, v.Subtitle = chosen, relation, relation+" · Eure Kinder sind verbunden"
+			}
+		}
 	}
 	if h.looks != nil && t.Peer.Kind != authz.ParticipantUnknown {
 		if figure, err := appearance.FigureSVG(h.looks.Get(subject).Figure, size); err == nil {
@@ -136,7 +161,7 @@ var chatInboxPage = template.Must(template.New("chat-inbox").Parse(`<!doctype ht
 <p class="yp-muted">Dein Kind sieht den Chat auf seinem verbundenen Gerät unter «Deine Eltern».</p>
 {{else}}<p class="yp-muted">Hier erscheinen deine Kinder.</p>{{end}}</section>
 <section aria-labelledby="yp-others"><h2 id="yp-others">Andere Eltern</h2>
-{{if .Parents}}<ul class="yp-threads">{{range .Parents}}<li><a href="/family/chat/{{.ID}}">{{.Figure}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}</ul>
+{{if .Parents}}<ul class="yp-threads">{{range .Parents}}<li><a href="/family/chat/{{.ID}}">{{.Figure}}<span>{{.Name}}{{if .Relation}}<small>{{.Relation}}</small>{{end}}</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}</ul>
 {{else}}<p class="yp-muted">Andere Eltern erscheinen hier, sobald eure Kinder verbunden sind. Das richtest du unter «Kontakte» bei deinem Kind ein.</p>{{end}}</section>
 <section aria-labelledby="yp-know"><h2 id="yp-know">Gut zu wissen</h2><ul class="yp-facts">
 <li>Was Kinder untereinander schreiben, kannst du hier nicht lesen. Dieser Bereich zeigt nur Chats, an denen du selbst teilnimmst.</li>
@@ -151,6 +176,7 @@ const chatInboxCSS = `.yp-page ul.yp-threads{display:flex;flex-direction:column;
 .yp-threads a{display:flex;align-items:center;gap:.8rem;min-height:64px;padding:.7rem .9rem;border:1px solid var(--yp-line);border-radius:var(--yp-radius);background:var(--yp-bg);color:var(--yp-text);font-weight:700;text-decoration:none;overflow-wrap:anywhere}
 .yp-threads a:focus-visible{outline:3px solid var(--yp-focus);outline-offset:2px}
 .yp-threads svg{flex:none}
+.yp-threads a small{display:block;font-weight:400;color:var(--yp-text-muted)}
 .yp-go{margin-left:auto;color:var(--yp-accent-text);font-size:1.4rem}
 `
 

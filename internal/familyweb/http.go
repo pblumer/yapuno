@@ -70,6 +70,9 @@ type Options struct {
 	Inactive []string
 	// Version is shown on the overview when set.
 	Version string
+	// Names links to "Mein Name" (NewNamePages) and shows the guardian's
+	// current names; nil means guardians have no names.
+	Names GuardianNames
 	// DeletePages links each child a guardian fully answers for to
 	// "Profil löschen" (NewDeletePages).
 	DeletePages bool
@@ -80,7 +83,7 @@ func NewWithOptions(auth Authenticator, store FamilyStore, opt Options) (http.Ha
 	if auth == nil || store == nil {
 		return nil, errors.New("authenticator and store are required")
 	}
-	h := &handler{auth: auth, store: store, looks: opt.Looks, devicesEnabled: opt.DevicePages, contactsEnabled: opt.ContactPages, securityEnabled: opt.SecurityPages, reports: opt.Reports, children: opt.Children, inviteEnabled: opt.InvitePages, chat: opt.Chat, inactive: opt.Inactive, version: opt.Version, deleteEnabled: opt.DeletePages}
+	h := &handler{auth: auth, store: store, looks: opt.Looks, devicesEnabled: opt.DevicePages, contactsEnabled: opt.ContactPages, securityEnabled: opt.SecurityPages, reports: opt.Reports, children: opt.Children, inviteEnabled: opt.InvitePages, chat: opt.Chat, inactive: opt.Inactive, version: opt.Version, deleteEnabled: opt.DeletePages, guardianNames: opt.Names}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /family", h.view)
 	mux.HandleFunc("POST /family/rename", h.rename)
@@ -106,6 +109,7 @@ type handler struct {
 	inactive        []string
 	version         string
 	deleteEnabled   bool
+	guardianNames   GuardianNames
 }
 
 func (h *handler) session(w http.ResponseWriter, r *http.Request) (Session, bool) {

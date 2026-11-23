@@ -86,9 +86,10 @@ func service(t *testing.T, j *journal, refuse error) *Service {
 			func(g, tn string) { _ = j.note("sessions " + g + "/" + tn) },
 			func(g, tn string) { _ = j.note("links " + g + "/" + tn) },
 		},
-		Before: []Dependent{{"devices", fakeStore{j, "devices"}}, {"contacts", fakeStore{j, "contacts"}}, {"looks", fakeStore{j, "looks"}}},
-		After:  []TenantDependent{{"invitations", fakeStore{j, "invitations"}}, {"locks", fakeStore{j, "locks"}}},
-		Logs:   []Log{{"messages", fakeStore{j, "messages"}}, {"guardian chat", fakeStore{j, "chat"}}},
+		Before:  []Dependent{{"devices", fakeStore{j, "devices"}}, {"contacts", fakeStore{j, "contacts"}}, {"looks", fakeStore{j, "looks"}}},
+		Records: []TenantDependent{{"names", fakeStore{j, "names"}}},
+		After:   []TenantDependent{{"invitations", fakeStore{j, "invitations"}}, {"locks", fakeStore{j, "locks"}}},
+		Logs:    []Log{{"messages", fakeStore{j, "messages"}}, {"guardian chat", fakeStore{j, "chat"}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +119,7 @@ func TestDeleteFamilyRemovesDependentsThenTheFamilyThenIdentitiesSessionsAndReco
 	want := "may-family anna/family-a > devices-tenant family-a > contacts-tenant family-a > looks-tenant family-a > " +
 		"remove-family anna/family-a > identities-remove family-a > " +
 		"sessions albert/family-a > links albert/family-a > sessions anna/family-a > links anna/family-a > " +
-		"invitations-tenant family-a > locks-tenant family-a > messages-compact > chat-compact"
+		"names-tenant family-a > invitations-tenant family-a > locks-tenant family-a > messages-compact > chat-compact"
 	if got := j.list(); got != want {
 		t.Fatalf("steps:\n got %s\nwant %s", got, want)
 	}
@@ -169,7 +170,7 @@ func TestAFailedDependentKeepsTheProfile(t *testing.T) {
 		t.Fatalf("family: %v", err)
 	}
 	got := j.list()
-	for _, never := range []string{"remove-child", "remove-family", "identities", "sessions", "locks", "looks", "compact"} {
+	for _, never := range []string{"remove-child", "remove-family", "identities", "sessions", "locks", "looks", "names", "compact"} {
 		if strings.Contains(got, never) {
 			t.Errorf("after a failed dependent, %q still ran: %s", never, got)
 		}
@@ -218,8 +219,9 @@ func TestLocksAndInvitationsStayWhenIdentitiesCouldNotBeRemoved(t *testing.T) {
 	if strings.Contains(got, "locks-tenant") || strings.Contains(got, "invitations-tenant") {
 		t.Fatalf("records were purged although the identities are left: %s", got)
 	}
-	// The guardians are signed out all the same.
-	if !strings.Contains(got, "sessions anna/family-a") || !strings.Contains(got, "sessions albert/family-a") || !strings.Contains(got, "messages-compact") {
+	// The guardians are signed out all the same, and what merely describes
+	// them goes with the family.
+	if !strings.Contains(got, "sessions anna/family-a") || !strings.Contains(got, "sessions albert/family-a") || !strings.Contains(got, "messages-compact") || !strings.Contains(got, "names-tenant family-a") {
 		t.Fatalf("steps: %s", got)
 	}
 }
@@ -235,12 +237,12 @@ func TestDeletionsDoNotInterleave(t *testing.T) {
 	wg.Wait()
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if len(j.steps)%14 != 0 {
+	if len(j.steps)%15 != 0 {
 		t.Fatalf("%d steps", len(j.steps))
 	}
-	for i := 0; i < len(j.steps); i += 14 {
-		if j.steps[i] != "may-family anna/family-a" || j.steps[i+13] != "chat-compact" {
-			t.Fatalf("deletions interleaved at %d: %v", i, j.steps[i:i+14])
+	for i := 0; i < len(j.steps); i += 15 {
+		if j.steps[i] != "may-family anna/family-a" || j.steps[i+14] != "chat-compact" {
+			t.Fatalf("deletions interleaved at %d: %v", i, j.steps[i:i+15])
 		}
 	}
 }
@@ -258,6 +260,9 @@ func TestNewNeedsTheFamilyStoreAndTheIdentities(t *testing.T) {
 	}
 	if _, err := New(Config{Families: fakeFamilies{j: j}, Identities: fakeStore{j, "identities"}, After: []TenantDependent{{"x", nil}}}); err == nil {
 		t.Error("nil tenant dependent accepted")
+	}
+	if _, err := New(Config{Families: fakeFamilies{j: j}, Identities: fakeStore{j, "identities"}, Records: []TenantDependent{{"x", nil}}}); err == nil {
+		t.Error("nil record store accepted")
 	}
 	if _, err := New(Config{Families: fakeFamilies{j: j}, Identities: fakeStore{j, "identities"}, Logs: []Log{{"x", nil}}}); err == nil {
 		t.Error("nil log accepted")
@@ -277,7 +282,7 @@ func TestNewNeedsTheFamilyStoreAndTheIdentities(t *testing.T) {
 
 // Each kind of leftover is reported on its own.
 func TestEveryFailureAfterTheFamilyIsGoneIsReported(t *testing.T) {
-	for _, step := range []string{"identities-remove family-a", "invitations-tenant family-a", "locks-tenant family-a", "messages-compact", "chat-compact"} {
+	for _, step := range []string{"identities-remove family-a", "names-tenant family-a", "invitations-tenant family-a", "locks-tenant family-a", "messages-compact", "chat-compact"} {
 		j := &journal{fail: map[string]bool{step: true}}
 		if err := service(t, j, nil).DeleteFamily("anna", "family-a"); !errors.Is(err, ErrLeftovers) {
 			t.Errorf("%s failed: %v", step, err)
@@ -292,5 +297,16 @@ func TestEveryFailureAfterTheFamilyIsGoneIsReported(t *testing.T) {
 		if err := service(t, j, nil).DeleteChild("anna", "family-a", "lea"); !errors.Is(err, ErrLeftovers) {
 			t.Errorf("child, %s failed: %v", step, err)
 		}
+	}
+}
+
+// Deleting one child leaves what describes the guardians alone.
+func TestDeletingAChildKeepsTheGuardiansRecords(t *testing.T) {
+	j := &journal{}
+	if err := service(t, j, nil).DeleteChild("anna", "family-a", "lea"); err != nil {
+		t.Fatal(err)
+	}
+	if got := j.list(); strings.Contains(got, "names") || strings.Contains(got, "invitations-tenant") || strings.Contains(got, "locks") || strings.Contains(got, "identities") {
+		t.Fatalf("steps: %s", got)
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pblumer/yapuno/internal/familystore"
+	"github.com/pblumer/yapuno/internal/guardiannames"
 	"github.com/pblumer/yapuno/internal/publicpage"
 )
 
@@ -69,6 +70,15 @@ type Config struct {
 	// ParentsChat says that guardians of connected children can write to
 	// each other on this installation, so the pages say so before asking.
 	ParentsChat bool
+	// Names is optional. With it the registering guardian may give the name
+	// by which guardians of connected families see them.
+	Names Names
+}
+
+// Names keeps the name a new guardian chose. It is only ever given the
+// guardian that this registration has just created.
+type Names interface {
+	Set(tenantID, guardianID string, names guardiannames.Names) error
 }
 
 // registration is what a confirmation link stands for. It lives in memory
@@ -76,6 +86,7 @@ type Config struct {
 type registration struct {
 	email      string
 	child      string
+	name       string // the guardian's name for other adults; may be empty
 	invitation string
 	expires    time.Time
 }
@@ -137,6 +148,8 @@ var joinPage = template.Must(template.New("join").Parse(shellOpen + `
 <form method="post" action="/join/request"><input type="hidden" name="code" value="{{.Code}}">
 <label class="yp-field">Deine E-Mail-Adresse<input type="email" name="email" autocomplete="email" required maxlength="254"></label>
 <label class="yp-field">Vorname oder Spitzname deines Kindes<input type="text" name="child_name" autocomplete="off" required maxlength="40"></label>
+{{if .AskName}}<label class="yp-field">Dein Name für andere Eltern (freiwillig)<input type="text" name="guardian_name" autocomplete="off" maxlength="40"></label>
+<p class="yp-muted">So sehen dich die Eltern von Familien, deren Kinder mit deinen verbunden sind. Du kannst ihn später ändern oder weglassen.</p>{{end}}
 <label class="yp-check"><input type="checkbox" name="confirm" value="yes" required> <span>Ich bin erziehungsberechtigt für dieses Kind.</span></label>
 <button type="submit">Bestätigungslink senden</button></form></section>
 <section aria-labelledby="yp-how"><h2 id="yp-how">Gut zu wissen</h2><ul>
@@ -212,9 +225,9 @@ func (h *Handler) showForm(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = joinPage.Execute(w, struct {
 		Title, Code, Inviting string
-		ParentsChat           bool
+		ParentsChat, AskName  bool
 		CSS                   template.CSS
-	}{"Einladung", codes[0], h.inviting(inv), h.cfg.ParentsChat, h.css})
+	}{"Einladung", codes[0], h.inviting(inv), h.cfg.ParentsChat, h.cfg.Names != nil, h.css})
 }
 
 // inviting names the child the invitation offers a contact with. It is empty
@@ -299,7 +312,12 @@ func (h *Handler) requestLink(w http.ResponseWriter, r *http.Request) {
 	}
 	email, validEmail := normalizeEmail(form.Get("email"))
 	child := strings.TrimSpace(form.Get("child_name"))
-	if form.Get("confirm") != "yes" || !validEmail || !familystore.ValidName(child) {
+	// The guardian's own name is optional, and only kept where names exist.
+	name := ""
+	if h.cfg.Names != nil {
+		name = strings.TrimSpace(form.Get("guardian_name"))
+	}
+	if form.Get("confirm") != "yes" || !validEmail || !familystore.ValidName(child) || len(form["guardian_name"]) > 1 || !guardiannames.Valid(name) {
 		http.Error(w, "Invalid registration", http.StatusBadRequest)
 		return
 	}
@@ -329,7 +347,7 @@ func (h *Handler) requestLink(w http.ResponseWriter, r *http.Request) {
 	}
 	key := sha256.Sum256([]byte(token))
 	h.mu.Lock()
-	h.pending[key] = registration{email: email, child: child, invitation: inv.ID, expires: now.Add(linkTTL)}
+	h.pending[key] = registration{email: email, child: child, name: name, invitation: inv.ID, expires: now.Add(linkTTL)}
 	h.mu.Unlock()
 	link := strings.TrimRight(h.cfg.Origin, "/") + "/join/verify?token=" + url.QueryEscape(token)
 	if err := h.cfg.Mailer.SendRegistrationLink(r.Context(), email, link); err != nil {
@@ -470,6 +488,12 @@ func (h *Handler) register(ctx context.Context, reg registration, connect bool) 
 		}
 		h.reopen(inv.ID, tenantID)
 		return "", "", notAsked, http.StatusServiceUnavailable
+	}
+	// The name is a courtesy: the family exists whether or not it is kept.
+	if reg.name != "" && h.cfg.Names != nil {
+		if err := h.cfg.Names.Set(tenantID, guardianID, guardiannames.Names{ForAdults: reg.name}); err != nil {
+			log.Printf("registration: the guardian's name could not be stored; the family is registered")
+		}
 	}
 	if !connect || inv.Child == "" || h.cfg.Connections == nil {
 		return guardianID, tenantID, notAsked, http.StatusOK

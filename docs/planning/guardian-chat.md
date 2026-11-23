@@ -50,7 +50,7 @@ Messages are deleted after 30 days; at most 2000 are kept per conversation and 2
 
 ## Known limits
 
-- Guardians have no display name.
+- Guardians have a name only where [guardian names](guardian-names.md) are switched on and the guardian chose one.
 - No notification, unread marker or read receipt.
 - A child cannot block or report a guardian.
 - Messages are plaintext on the server and there is no moderation.

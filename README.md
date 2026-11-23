@@ -104,6 +104,13 @@ other**. The family page is now a real start page with every function and a
 guide to the first chat. See [who talks to whom and the limits](docs/planning/guardian-chat.md)
 and the [proposed ADR](docs/adr/draft-guardian-chat.md).
 
+With `YAPUNO_GUARDIAN_NAMES_FILE`, a guardian may choose two names: one their
+own children see ("Mami") and one the guardians of connected families see
+("Anna"), always next to "Elternteil von …". Both are optional, changeable and
+unchecked, and nobody without a relationship sees them. See
+[who sees which name](docs/planning/guardian-names.md) and the
+[proposed ADR](docs/adr/draft-guardian-names.md).
+
 ## Messaging (preview)
 
 With `YAPUNO_MESSAGES_FILE` (plus pairing and contacts), two children whose

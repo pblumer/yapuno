@@ -46,6 +46,7 @@ var homePage = template.Must(template.New("home").Parse(`<!doctype html><html la
 {{if .ChatEnabled}}<li><a href="/family/chat"><span>Chats<small>Mit deinen Kindern und mit anderen Eltern schreiben</small></span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 {{if .CanAddChild}}<li><a href="/family/children"><span>Weiteres Kind anlegen</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 {{if .CanInvite}}<li><a href="/family/invite"><span>Eine Familie einladen<small>Damit sie sich selbst registrieren kann</small></span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
+{{if .NamesEnabled}}<li><a href="/family/name"><span>Mein Name<small>{{if .MyNames}}{{.MyNames}}{{else}}Noch kein Name{{end}}</small></span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 {{if .LookEnabled}}<li><a href="/family/look"><span>Mein Look ändern</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 {{if .SecurityEnabled}}<li><a href="/family/security"><span>Sicherheit und Abmelden</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 </ul></section>
@@ -75,6 +76,22 @@ var (
 		"not-remembered":          "Du bist angemeldet, aber nur für kurze Zeit: Die Anmeldung konnte auf diesem Gerät nicht gespeichert werden.",
 	}
 )
+
+// myNames says in one line by which names the guardian is shown.
+func (h *handler) myNames(p Session) string {
+	if h.guardianNames == nil {
+		return ""
+	}
+	names := h.guardianNames.Get(p.TenantID, p.GuardianID)
+	var parts []string
+	if names.ForChildren != "" {
+		parts = append(parts, "Für deine Kinder: "+names.ForChildren)
+	}
+	if names.ForAdults != "" {
+		parts = append(parts, "Für andere Eltern: "+names.ForAdults)
+	}
+	return strings.Join(parts, " · ")
+}
 
 // shortVersion keeps a build stamp readable on a phone: a commit id is cut
 // to its first twelve characters.
@@ -154,8 +171,9 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 		DevicesEnabled, ContactsEnabled, ChatEnabled bool
 		LookEnabled, SecurityEnabled                 bool
 		CanAddChild, CanInvite, InviteConnects       bool
-		DeleteEnabled                                bool
-	}{DeleteEnabled: h.deleteEnabled, Alert: homeAlerts[r.URL.Query().Get("done")], Notice: homeNotices[r.URL.Query().Get("done")], Skin: def.ID, CSRF: p.CSRFToken, Inactive: strings.Join(h.inactive, ", "), Version: shortVersion(h.version),
+		DeleteEnabled, NamesEnabled                  bool
+		MyNames                                      string
+	}{DeleteEnabled: h.deleteEnabled, NamesEnabled: h.guardianNames != nil, MyNames: h.myNames(p), Alert: homeAlerts[r.URL.Query().Get("done")], Notice: homeNotices[r.URL.Query().Get("done")], Skin: def.ID, CSRF: p.CSRFToken, Inactive: strings.Join(h.inactive, ", "), Version: shortVersion(h.version),
 		CSS: template.CSS(fonts + ".yp-page{" + decls + "}\n" + contactCSS + lostCSS + homeCSS), Figure: figure, Children: children,
 		DevicesEnabled: h.devicesEnabled, ContactsEnabled: h.contactsEnabled, ChatEnabled: h.chat != nil,
 		LookEnabled: h.looks != nil, SecurityEnabled: h.securityEnabled,
