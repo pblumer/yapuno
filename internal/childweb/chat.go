@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"html/template"
 	"io"
 	"mime"
 	"net/http"
@@ -67,6 +68,25 @@ func (h *handler) familyThread(s childsession.Session, conversationID string) (F
 	return FamilyThread{}, false
 }
 
+// chatList is the child's own conversations as the start page lists them:
+// its guardians and its crew. A wide screen shows it beside the open one.
+func (h *handler) chatList(s childsession.Session, open string) []chatpage.ThreadGroup {
+	entry := func(name, id string, figure template.HTML) chatpage.Thread {
+		return chatpage.Thread{Name: name, Href: "/child/chat/" + id, Figure: figure, Current: id == open}
+	}
+	parents, crew := chatpage.ThreadGroup{Title: "Deine Eltern"}, chatpage.ThreadGroup{Title: "Deine Crew"}
+	for _, m := range h.parents(s) {
+		parents.Threads = append(parents.Threads, entry(m.Name, m.Chat, m.Figure))
+	}
+	if h.opt.Contacts != nil {
+		self := contacts.Party{TenantID: s.TenantID, ChildID: s.ChildID}
+		for _, c := range h.opt.Contacts.ContactsOf(self) {
+			crew.Threads = append(crew.Threads, entry(c.Name, c.ID, h.peerFigure(self, c.ID)))
+		}
+	}
+	return []chatpage.ThreadGroup{parents, crew}
+}
+
 // renderChat writes the conversation page. A caller that is not allowed to
 // read the conversation is sent back to the start page without any content.
 func (h *handler) renderChat(w http.ResponseWriter, r *http.Request, s childsession.Session, conversationID string, status int, alert, draft string) {
@@ -103,6 +123,7 @@ func (h *handler) renderChat(w http.ResponseWriter, r *http.Request, s childsess
 	view.Skin, view.Home, view.HomeLabel = pref.Skin, "/child", "Zurück zu deiner Crew"
 	view.Path, view.Assets, view.Conversation = "/child/chat/"+conversationID, "/child", conversationID
 	view.CSRF, view.ClientID, view.Alert, view.Draft = s.CSRFToken, clientID, alert, draft
+	view.Threads = h.chatList(s, conversationID)
 	headers(w, true)
 	if err := chatpage.Render(w, status, view); err != nil {
 		http.Error(w, "Unable to display chat", http.StatusInternalServerError)

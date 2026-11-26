@@ -207,21 +207,26 @@ func (h *chatHandler) inbox(w http.ResponseWriter, r *http.Request) {
 	}{Skin: skinID, CSS: css, Children: children, Parents: parents})
 }
 
-// thread returns one of the guardian's own current conversations.
-func (h *chatHandler) thread(p Session, id string) (guardianchat.Thread, bool) {
-	for _, t := range h.chat.Threads(actorOf(p)) {
-		if t.ID == id {
-			return t, true
-		}
-	}
-	return guardianchat.Thread{}, false
-}
-
 // render writes the conversation page. A guardian who may not read the
 // conversation is sent back to the overview without any content.
 func (h *chatHandler) render(w http.ResponseWriter, r *http.Request, p Session, id string, status int, alert, draft string) {
-	t, ok := h.thread(p, id)
-	if !ok {
+	// The guardian's own current conversations: the open one must be among
+	// them, and a wide screen lists all of them beside it, as the overview does.
+	var about threadView
+	open := false
+	list := []chatpage.ThreadGroup{{Title: "Deine Kinder"}, {Title: "Andere Eltern"}}
+	for _, t := range h.chat.Threads(actorOf(p)) {
+		v := h.describe(t, 44)
+		group := &list[1]
+		if t.Kind == guardianchat.Family {
+			group = &list[0]
+		}
+		group.Threads = append(group.Threads, chatpage.Thread{Name: v.Name, Detail: v.Relation, Href: "/family/chat/" + t.ID, Figure: v.Figure, Current: t.ID == id})
+		if t.ID == id {
+			about, open = v, true
+		}
+	}
+	if !open {
 		http.Redirect(w, r, "/family/chat", http.StatusSeeOther)
 		return
 	}
@@ -235,11 +240,10 @@ func (h *chatHandler) render(w http.ResponseWriter, r *http.Request, p Session, 
 		http.Error(w, "Unable to display chat", http.StatusInternalServerError)
 		return
 	}
-	about := h.describe(t, 44)
 	self := actorOf(p).Participant
 	page := chatpage.Page{Peer: about.Name, Subtitle: about.Subtitle, PeerFigure: about.Figure,
 		Home: "/family/chat", HomeLabel: "Zurück zu den Chats", Path: "/family/chat/" + id, Assets: "/family",
-		Conversation: id, CSRF: p.CSRFToken, ClientID: clientID, Alert: alert, Draft: draft, Skin: "classic"}
+		Conversation: id, CSRF: p.CSRFToken, ClientID: clientID, Alert: alert, Draft: draft, Skin: "classic", Threads: list}
 	if h.looks != nil {
 		page.Skin = h.looks.Get(guardianSubject(p)).Skin
 	}

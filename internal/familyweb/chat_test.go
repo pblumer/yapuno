@@ -443,3 +443,53 @@ func TestGuardianChatAcceptsBrowsersThatSendANullOrigin(t *testing.T) {
 		t.Fatalf("stored: %d", len(got))
 	}
 }
+
+// sideList returns the list of conversations beside the open one.
+func sideList(t *testing.T, body string) string {
+	t.Helper()
+	from, to := strings.Index(body, `<nav class="yp-side"`), strings.Index(body, "</nav>")
+	if from < 0 || to < from {
+		t.Fatal("no list of conversations")
+	}
+	return body[from:to]
+}
+
+func TestAConversationListsTheGuardiansOwnChatsBesideIt(t *testing.T) {
+	cw := newChatWorld(t)
+	a := cw.pages(t, testAuth{session: sessionA})
+	family, parents := cw.thread(t, sessionA, guardianchat.Family), cw.thread(t, sessionA, guardianchat.Parents)
+	list := sideList(t, chatGet(a, "/"+family).Body.String())
+	for _, want := range []string{"Deine Kinder", `<a href="/family/chat/` + family + `" aria-current="page">`, "Alex", "Andere Eltern", `<a href="/family/chat/` + parents + `">`, "Elternteil von Bea", "<svg"} {
+		if !strings.Contains(list, want) {
+			t.Errorf("list lacks %q", want)
+		}
+	}
+	// No identifier of the other family and nobody the guardian has no chat with.
+	for _, absent := range []string{"guardian-b", "tenant-b", "child-b", "Cem"} {
+		if strings.Contains(list, absent) {
+			t.Errorf("list contains %q", absent)
+		}
+	}
+	// The open conversation is the one that is marked.
+	if other := sideList(t, chatGet(a, "/"+parents).Body.String()); !strings.Contains(other, `<a href="/family/chat/`+parents+`" aria-current="page">`) || strings.Count(other, "aria-current") != 1 {
+		t.Errorf("the open conversation is not the marked one: %s", other)
+	}
+	// Another family sees its own conversations only.
+	own := cw.thread(t, sessionC, guardianchat.Family)
+	apart := sideList(t, chatGet(cw.pages(t, testAuth{session: sessionC}), "/"+own).Body.String())
+	if !strings.Contains(apart, "Cem") || !strings.Contains(apart, `<a href="/family/chat/`+own+`" aria-current="page">`) {
+		t.Errorf("own list: %s", apart)
+	}
+	for _, absent := range []string{"Alex", "Bea", "Andere Eltern", family, parents} {
+		if strings.Contains(apart, absent) {
+			t.Errorf("another family's list contains %q", absent)
+		}
+	}
+	// The list follows the contact: it is read again for every page.
+	if err := cw.store.Remove("guardian-a", "tenant-a", "child-a", cw.link); err != nil {
+		t.Fatal(err)
+	}
+	if after := sideList(t, chatGet(a, "/"+family).Body.String()); strings.Contains(after, parents) || strings.Contains(after, "Andere Eltern") || !strings.Contains(after, "Alex") {
+		t.Errorf("list does not follow the contact: %s", after)
+	}
+}

@@ -27,6 +27,7 @@ Everything else is refused: an adult never writes to a child of another family, 
 - Guardian: **Familie → Chats** (`/family/chat`), or **Mit … schreiben** on the child's card. Other guardians appear as "Elternteil von …" as soon as the children are connected.
 - Child: **Deine Eltern** on the start page (`/child`). With two guardians they are shown as "Elternteil 1" and "Elternteil 2".
 - Both sides use the same chat page as the children's chat: messages appear without reloading, sending shows a state and can be retried, and the page works without JavaScript by form post.
+- In a window of at least 60rem the chat page lists the reader's own conversations to the left of the open one: for a guardian the same entries as **Chats**, for a child its guardians and its crew as on the start page. The list is read from current state for every page and names nobody the overview would not name. Narrower windows show the conversation alone.
 
 ## What ends a conversation
 
@@ -51,8 +52,8 @@ Messages are deleted after 30 days; at most 2000 are kept per conversation and 2
 ## Known limits
 
 - Guardians have a name only where [guardian names](guardian-names.md) are switched on and the guardian chose one.
-- No notification, unread marker or read receipt.
+- No notification, unread marker or read receipt. The list beside a conversation does not change while the page is open: a new message in another conversation is not indicated, and a conversation that ended disappears on the next page load (opening it leads back to the overview).
 - A child cannot block or report a guardian.
 - Messages are plaintext on the server and there is no moderation.
 - Two message stores exist side by side; see the ADR draft.
-- Verified in a real desktop browser at 320, 375 and 430 px, including the whole path from one family to three kinds of chat; not yet on real phones or with a screen reader.
+- Verified in a real desktop browser at 320, 375 and 430 px, including the whole path from one family to three kinds of chat; not yet on real phones or with a screen reader. The two-column layout was measured in Chromium only, on a statically rendered page from 320 to 2000 px; not in Safari or Firefox, on a tablet or with a screen reader.

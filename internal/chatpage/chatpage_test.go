@@ -98,3 +98,50 @@ func TestWideScreensKeepTheConversationInAReadableColumn(t *testing.T) {
 		}
 	}
 }
+
+// A wide screen lists the reader's conversations beside the open one. A
+// phone keeps the single page and its back link: the list is not displayed.
+func TestTheReadersConversationsAreListedBesideTheOpenOneOnWideScreensOnly(t *testing.T) {
+	const hostile = `"><script>alert(1)</script>`
+	_, body := render(t, Page{Peer: "Alex", Threads: []ThreadGroup{
+		{Title: "Deine Kinder", Threads: []Thread{{Name: "Alex", Href: "/family/chat/a", Figure: `<svg width="44"></svg>`, Current: true}}},
+		{Title: "Leer"},
+		{Title: "Andere Eltern", Threads: []Thread{{Name: "Sam", Detail: "Elternteil von Bea", Href: "/family/chat/b"}, {Name: hostile, Detail: hostile, Href: "/family/chat/c"}}},
+	}})
+	for _, want := range []string{
+		`<div class="yp-chat yp-split" id="yp-chat"`, `<nav class="yp-side" aria-label="Chats">`,
+		`<p class="yp-group" id="yp-group-0">Deine Kinder</p><ul aria-labelledby="yp-group-0">`,
+		`<li><a href="/family/chat/a" aria-current="page"><svg width="44"></svg><span>Alex</span></a></li>`,
+		`<p class="yp-group" id="yp-group-1">Andere Eltern</p><ul aria-labelledby="yp-group-1">`,
+		`<li><a href="/family/chat/b"><span>Sam<small>Elternteil von Bea</small></span></a></li>`, `<main class="yp-pane">`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+	if strings.Count(body, `aria-current="page"`) != 1 || strings.Contains(body, "<script>alert") || strings.Contains(body, "Leer") {
+		t.Error("more than one open conversation, unescaped text or an empty group")
+	}
+	if list, pane := strings.Index(body, `<nav class="yp-side"`), strings.Index(body, `<main class="yp-pane">`); list < 0 || pane < list {
+		t.Fatal("the list must come before the conversation")
+	}
+	style := body[strings.Index(body, "<style>")+7 : strings.Index(body, "</style>")]
+	wide := strings.Index(style, "@media (min-width:60rem){")
+	if wide < 0 {
+		t.Fatal("no wide layout")
+	}
+	if !strings.Contains(style[:wide], "\n.yp-side{display:none}\n") || strings.Contains(style[:wide], "display:grid;grid-template-columns") {
+		t.Error("the narrow baseline must not show the list")
+	}
+	for _, want := range []string{".yp-split{display:grid;grid-template-columns:18rem minmax(0,1fr)}", ".yp-split .yp-side{display:block;", ".yp-side a{display:flex;align-items:center;gap:.6rem;min-height:48px;", ".yp-side a:focus-visible{outline:3px solid var(--yp-focus)"} {
+		if !strings.Contains(style[wide:], want) {
+			t.Errorf("wide layout lacks %q", want)
+		}
+	}
+	// Without conversations to list there is neither a list nor a second column.
+	for _, p := range []Page{{Peer: "Alex"}, {Peer: "Alex", Threads: []ThreadGroup{{Title: "Leer"}}}} {
+		if _, alone := render(t, p); strings.Contains(alone, "<nav") || strings.Contains(alone, `class="yp-chat yp-split"`) || !strings.Contains(alone, `<div class="yp-chat" id="yp-chat"`) || !strings.Contains(alone, `<main class="yp-pane">`) {
+			t.Error("a page without conversations to list shows a list")
+		}
+	}
+}

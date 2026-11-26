@@ -271,3 +271,48 @@ func TestChildSignInAndChatAcceptBrowsersThatSendANullOrigin(t *testing.T) {
 		t.Fatalf("send without CSRF token: %d", rec.Code)
 	}
 }
+
+// sideList returns the list of conversations beside the open one.
+func sideList(t *testing.T, body string) string {
+	t.Helper()
+	from, to := strings.Index(body, `<nav class="yp-side"`), strings.Index(body, "</nav>")
+	if from < 0 || to < from {
+		t.Fatal("no list of conversations")
+	}
+	return body[from:to]
+}
+
+func TestAConversationListsTheChildsOwnChatsBesideIt(t *testing.T) {
+	cw, _ := newFamilyWorld(t)
+	list := sideList(t, cw.get("/child/chat/"+cw.chat, cw.alex).Body.String())
+	for _, want := range []string{"Deine Eltern", `<a href="/child/chat/` + familyThread + `">`, "Mama", "Deine Crew", `<a href="/child/chat/` + cw.chat + `" aria-current="page">`, "Bea"} {
+		if !strings.Contains(list, want) {
+			t.Errorf("list lacks %q", want)
+		}
+	}
+	for _, absent := range []string{"child-b", "tenant-b", "guardian-a", "Cem"} {
+		if strings.Contains(list, absent) {
+			t.Errorf("list contains %q", absent)
+		}
+	}
+	if own := sideList(t, cw.get("/child/chat/"+familyThread, cw.alex).Body.String()); !strings.Contains(own, `<a href="/child/chat/`+familyThread+`" aria-current="page">`) || strings.Count(own, "aria-current") != 1 {
+		t.Errorf("the open conversation is not the marked one: %s", own)
+	}
+	// Bea sees Alex and nothing of Alex's family.
+	other := sideList(t, cw.get("/child/chat/"+cw.chat, cw.bea).Body.String())
+	if !strings.Contains(other, "Alex") || !strings.Contains(other, `<a href="/child/chat/`+cw.chat+`" aria-current="page">`) {
+		t.Errorf("Bea's list: %s", other)
+	}
+	for _, absent := range []string{"Mama", "Deine Eltern", familyThread} {
+		if strings.Contains(other, absent) {
+			t.Errorf("Bea's list contains %q", absent)
+		}
+	}
+	// The list follows the contact: it is read again for every page.
+	if err := cw.contacts.Remove("guardian-a", "tenant-a", "child-a", cw.chat); err != nil {
+		t.Fatal(err)
+	}
+	if after := sideList(t, cw.get("/child/chat/"+familyThread, cw.alex).Body.String()); strings.Contains(after, "Bea") || strings.Contains(after, "Deine Crew") || !strings.Contains(after, "Mama") {
+		t.Errorf("list does not follow the contact: %s", after)
+	}
+}
