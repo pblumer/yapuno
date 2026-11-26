@@ -25,6 +25,7 @@ Yapuno is **mobile first, not merely responsive**. The experience is built and a
 
 ## Implementation guidance
 - CSS layout uses narrow-screen baseline and progressive `min-width` media queries.
+- On wide screens the chat keeps its messages, header content and compose field in one centred column of at most 40rem; the bars themselves span the window. Below that width the phone layout applies unchanged.
 - HTML, semantic inputs and accessible focus management first. Use HTMX only where it reduces complexity, primarily guardian flows.
 - WebSocket connection for foreground realtime; normal authenticated HTTP for pairing/history/recovery, with robust fallback where possible.
 - Avoid unsupported claims of durable offline messaging; distinguish a local unsent draft from a server-accepted message.

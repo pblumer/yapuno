@@ -80,3 +80,21 @@ func TestHelpersProduceWhatTheScriptExpects(t *testing.T) {
 		t.Fatal("script missing or not path-agnostic")
 	}
 }
+
+// On a wide screen the bars still span the window, but everything in them
+// and the messages share one centred column; on a phone the column is wider
+// than the screen and the plain paddings apply.
+func TestWideScreensKeepTheConversationInAReadableColumn(t *testing.T) {
+	_, body := render(t, Page{Peer: "Alex"})
+	style := body[strings.Index(body, "<style>")+7 : strings.Index(body, "</style>")]
+	if !strings.Contains(style, "--yp-chat-side:calc(50% - 20rem)") {
+		t.Fatal("no column width")
+	}
+	inColumn := regexp.MustCompile(`padding-inline:max\(\.\d+rem,var\(--yp-chat-side\)\)`)
+	for _, selector := range []string{".yp-head", ".yp-banner", ".yp-list", ".yp-compose"} {
+		rule := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(selector) + `\{[^}]*\}`).FindString(style)
+		if !inColumn.MatchString(rule) {
+			t.Errorf("%s is not held in the column: %q", selector, rule)
+		}
+	}
+}
