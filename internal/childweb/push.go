@@ -42,11 +42,19 @@ type PushSubscriptions interface {
 	Subscribed(d webpush.Device) bool
 }
 
-// Push enables content-free notifications. Both parts are needed; both nil
-// switches the feature off. See docs/adr/draft-web-push.md.
+// Notices answers a device what it was told about by its last pushes, and
+// forgets it. It is asked only for the device of the verified session.
+type Notices interface {
+	Take(d webpush.Device) webpush.Kind
+}
+
+// Push enables content-free notifications. Key and Subscriptions are needed
+// together; both nil switches the feature off. Notices, optional, lets the
+// worker ask what a push was about. See docs/adr/draft-web-push.md.
 type Push struct {
 	Key           PushKey
 	Subscriptions PushSubscriptions
+	Notices       Notices
 }
 
 func (p Push) enabled() bool { return p.Key != nil && p.Subscriptions != nil }
@@ -107,7 +115,9 @@ func iconHandler(size int) http.HandlerFunc {
 // changed worker reaches devices; it may load the notification icon only.
 func serviceWorker(w http.ResponseWriter, _ *http.Request) {
 	publicHeaders(w, "text/javascript; charset=utf-8")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'")
+	// The worker loads its own helpers and asks its own origin what a push
+	// was about; nothing else.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; script-src 'self'; connect-src 'self'")
 	_, _ = w.Write(serviceWorkerJS)
 }
 
@@ -259,4 +269,26 @@ func (h *handler) unsubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// notice tells the worker of the signed-in device which kinds of notices
+// were delivered to it. The answer holds three booleans and nothing else;
+// the worker turns them into fixed sentences.
+func (h *handler) notice(w http.ResponseWriter, r *http.Request) {
+	headers(w, false)
+	if !sameorigin.Request(r) {
+		chatpage.JSONError(w, http.StatusForbidden, "origin")
+		return
+	}
+	s, err := h.sessions.Authenticate(r)
+	if err != nil {
+		chatpage.JSONError(w, http.StatusUnauthorized, "signed_out")
+		return
+	}
+	k := h.opt.Push.Notices.Take(device(s))
+	chatpage.WriteJSON(w, http.StatusOK, map[string]bool{
+		"message": k&webpush.KindMessage != 0,
+		"turn":    k&webpush.KindTurn != 0,
+		"invite":  k&webpush.KindInvite != 0,
+	})
 }

@@ -56,7 +56,22 @@
     return {on: state === "off" || state === "failed", off: state === "on" || state === "failed_off"};
   }
 
-  const api = {keyBytes, situation, outcome, message, buttons};
+  // What a notification says. The server answers which kinds were
+  // delivered to this device; only true booleans count, and the sentences
+  // are fixed here, so no text from anywhere reaches the lock screen.
+  const NEUTRAL = "Bei Yapuno gibt es etwas Neues für dich.";
+  const SENTENCES = [
+    ["message", "Du hast eine neue Nachricht."],
+    ["turn", "Du bist am Zug."],
+    ["invite", "Du wurdest zu einer Schachpartie eingeladen."],
+  ];
+  function noticeText(kinds) {
+    if (!kinds || typeof kinds !== "object") return NEUTRAL;
+    const parts = SENTENCES.filter(([key]) => kinds[key] === true).map(([, text]) => text);
+    return parts.length > 0 ? parts.join(" ") : NEUTRAL;
+  }
+
+  const api = {keyBytes, situation, outcome, message, buttons, noticeText, NEUTRAL};
   root.YapunoPush = api;
   if (typeof module === "object" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

@@ -1042,3 +1042,65 @@ func TestFinishedGamesAreRatedOnce(t *testing.T) {
 		}
 	}
 }
+
+func TestTurnsAndInvitationsAreAnnounced(t *testing.T) {
+	w := newWorld(t)
+	var got []string
+	w.store.SetNotifier(func(n Notice) {
+		kind := "turn"
+		if n.Invite {
+			kind = "invite"
+		}
+		got = append(got, fmt.Sprintf("%s/%s %s", n.TenantID, n.ChildID, kind))
+	})
+	take := func() []string { out := got; got = nil; return out }
+	v, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := take(); len(n) != 1 || n[0] != "family-b/mia invite" {
+		t.Fatalf("invitation: %q", n)
+	}
+	if !w.store.Waiting(w.mia, w.contact, true) || w.store.Waiting(w.mia, w.contact, false) || w.store.Waiting(w.lea, w.contact, true) {
+		t.Fatal("waiting for an answer")
+	}
+	w.store.Act(w.mia, v.ID, Action{Kind: Accept, ClientID: w.id()})
+	if n := take(); len(n) != 1 || n[0] != "family-a/lea turn" {
+		t.Fatalf("accepted, white to move: %q", n)
+	}
+	id := w.id()
+	w.store.Act(w.lea, v.ID, Action{Kind: Move, ClientID: id, Move: "e2e4"})
+	if n := take(); len(n) != 1 || n[0] != "family-b/mia turn" {
+		t.Fatalf("after a move: %q", n)
+	}
+	if !w.store.Waiting(w.mia, w.contact, false) || w.store.Waiting(w.lea, w.contact, false) {
+		t.Fatal("waiting for a move")
+	}
+	w.store.Act(w.lea, v.ID, Action{Kind: Move, ClientID: id, Move: "e2e4"})
+	w.store.Act(w.lea, v.ID, Action{Kind: OfferDraw, ClientID: w.id()})
+	w.store.Act(w.mia, v.ID, Action{Kind: Resign, ClientID: w.id()})
+	if n := take(); len(n) != 0 {
+		t.Fatalf("retry, draw offer and resignation announced: %q", n)
+	}
+	if w.store.Waiting(w.noah, w.contact, false) || w.store.Waiting(w.mia, w.contact, false) {
+		t.Fatal("waiting after the end or for an outsider")
+	}
+	// Family games: guardians are never told, the child is.
+	w.store.EnableFamilies(w.families, guardianDirectory{})
+	anna := GuardianPrincipal{TenantID: "family-a", GuardianID: "anna"}
+	fg, err := w.store.GuardianInvite(anna, "lea", w.id(), Correspondence, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := take(); len(n) != 1 || n[0] != "family-a/lea invite" {
+		t.Fatalf("guardian's invitation: %q", n)
+	}
+	w.store.Act(w.lea, fg.ID, Action{Kind: Accept, ClientID: w.id()})
+	if n := take(); len(n) != 0 {
+		t.Fatalf("guardian told: %q", n)
+	}
+	w.store.GuardianAct(anna, fg.ID, Action{Kind: Move, ClientID: w.id(), Move: "d2d4"})
+	if n := take(); len(n) != 1 || n[0] != "family-a/lea turn" {
+		t.Fatalf("guardian moved: %q", n)
+	}
+}

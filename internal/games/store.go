@@ -449,6 +449,7 @@ type Store struct {
 	families  Families
 	guardians Guardians
 	rater     Rater
+	notify    func(Notice)
 
 	file  *os.File
 	size  int64
@@ -940,6 +941,59 @@ func (s *Store) rate(g *game, now time.Time) {
 	}
 }
 
+// Notice says that a child is now waited for in a game: invited (Invite) or
+// to move. Guardians are never named: they have no device binding.
+type Notice struct {
+	TenantID, ChildID, Scope string
+	Invite                   bool
+}
+
+// SetNotifier is called after every stored invitation and move that leaves
+// a child waited for. It must not block.
+func (s *Store) SetNotifier(f func(Notice)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.notify = f
+}
+
+// announce tells the notifier who is waited for after an action.
+func (s *Store) announce(g *game, actor authz.Participant, now time.Time) {
+	if s.notify == nil {
+		return
+	}
+	if end, _, _ := g.settle(now); end != "" {
+		return
+	}
+	var waited authz.Participant
+	invite := g.phase == Invited
+	if invite {
+		waited = g.invitee
+	} else {
+		waited = g.inviter
+		if g.colorOf(g.invitee) == g.rules.Position().Turn() {
+			waited = g.invitee
+		}
+	}
+	if waited == actor || waited.Kind != authz.ParticipantChild {
+		return
+	}
+	s.notify(Notice{TenantID: waited.TenantID, ChildID: waited.ID, Scope: g.scope, Invite: invite})
+}
+
+// Waiting reports whether the child is waited for in the scope right now:
+// invited (invite) or to move. It authorizes like Latest; a delivery of a
+// notice checks it again.
+func (s *Store) Waiting(p Principal, scope string, invite bool) bool {
+	v, found, err := s.Latest(p, scope)
+	if err != nil || !found {
+		return false
+	}
+	if invite {
+		return v.YourTurnToAnswer()
+	}
+	return v.YourTurn()
+}
+
 // SetRater switches on ratings and rates every game that has ended.
 func (s *Store) SetRater(r Rater) {
 	s.mu.Lock()
@@ -1101,6 +1155,7 @@ func (s *Store) invite(p actor, contactID, clientID string, mode Mode, tips bool
 	}
 	s.games[id] = g
 	s.remember(g, e)
+	s.announce(g, p.who, now)
 	return s.view(g, p.who, now), nil
 }
 
@@ -1146,6 +1201,9 @@ func (s *Store) act(p actor, gameID string, a Action) (View, bool, error) {
 	}
 	g.apply(e)
 	s.remember(g, e)
+	if a.Kind == Move || a.Kind == Accept {
+		s.announce(g, p.who, now)
+	}
 	return s.view(g, p.who, now), false, nil
 }
 

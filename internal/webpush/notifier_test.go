@@ -49,10 +49,10 @@ type readers struct {
 	allowed map[Device]map[string]bool
 }
 
-func (r *readers) may(d Device, conversation string) bool {
+func (r *readers) may(d Device, n Notice) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.allowed[d][conversation]
+	return r.allowed[d][n.ID]
 }
 
 func (r *readers) allow(d Device, conversation string) {
@@ -301,7 +301,7 @@ func TestRunDeliversInTheBackgroundUntilCancelled(t *testing.T) {
 func TestNewNotifierNeedsEveryPart(t *testing.T) {
 	key, _ := newKey(t)
 	store, _ := openStore(t, newDevices())
-	may := func(Device, string) bool { return true }
+	may := func(Device, Notice) bool { return true }
 	now := time.Now
 	client := &recorder{}
 	for name, build := range map[string]func() (*Notifier, error){

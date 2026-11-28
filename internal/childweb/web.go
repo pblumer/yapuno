@@ -160,6 +160,9 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 		mux.HandleFunc("GET /child/notifications", h.notifications)
 		mux.HandleFunc("POST /child/push/subscription", h.subscribe)
 		mux.HandleFunc("POST /child/push/unsubscribe", h.unsubscribe)
+		if opt.Push.Notices != nil {
+			mux.HandleFunc("POST /child/push/notice", h.notice)
+		}
 	}
 	if opt.Looks != nil {
 		mux.HandleFunc("GET /child/look", h.lookView)

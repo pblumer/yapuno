@@ -78,6 +78,6 @@ Page rendered at 320 and 390 CSS px: no horizontal overflow; tap on a bishop hig
 
 - No playtime quota (#19 leaves the semantics open).
 - Tips and the computer opponent are simple heuristics (see above); the rating is private and not calibrated; there are no rankings.
-- No notifications; a child sees an invitation or a move only when opening Yapuno.
+- Notifications for invitations and turns only where Web Push is switched on ([notifications](web-push.md)); guardians get none.
 - Polling, not realtime; single server process; all games in memory.
 - Games between siblings, with guardians of other families or in groups are not possible. Family games need the guardians' chat to be on.

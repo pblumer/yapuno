@@ -187,8 +187,10 @@ func TestTheNotificationsPageExplainsWhatIsSentAndNeedsASession(t *testing.T) {
 	if worker.Header().Get("Cache-Control") != "no-cache" {
 		t.Fatalf("worker cache: %q", worker.Header().Get("Cache-Control"))
 	}
-	// The worker shows a fixed sentence and never reads a payload.
-	if js := worker.Body.String(); strings.Contains(js, "event.data") || !strings.Contains(js, "Du hast eine neue Nachricht.") || !strings.Contains(js, "showNotification") {
+	// The worker never reads a payload and shows only the fixed sentences
+	// of push-utils.js (tested there).
+	if js := worker.Body.String(); strings.Contains(js, "event.data") || strings.Contains(js, "e.data") || strings.Contains(js, ".data.") ||
+		!strings.Contains(js, "self.YapunoPush.noticeText(kinds)") || !strings.Contains(js, "showNotification") {
 		t.Fatal("worker reads a payload or shows something else")
 	}
 }

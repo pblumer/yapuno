@@ -26,7 +26,10 @@ Both variables go together. They require `YAPUNO_PAIRING_FILE` and at least one 
 1. The child opens **Benachrichtigungen** on its start page (`/child/notifications`) and taps **Einschalten**. The browser asks for permission.
 2. The page sends only the endpoint of the browser's subscription. The server stores it for the device of the session.
 3. A message is stored. Then the server sends an empty push to every subscribed device of the recipient child, after checking that the device is still approved and the child may read the conversation now.
-4. The device shows "Yapuno – Du hast eine neue Nachricht." A tap opens Yapuno.
+4. The worker asks the server which kinds were delivered to this device (signing in with the device key if the session has ended) and shows fixed sentences: "Du hast eine neue Nachricht.", "Du bist am Zug." or "Du wurdest zu einer Schachpartie eingeladen.", several of them if several apply; "Bei Yapuno gibt es etwas Neues für dich." if the server cannot be asked. A tap opens Yapuno.
+5. Chess: a child is told when it is invited to a game and when it is its move. A child is not told about its own actions; guardians are not told.
+
+Headless Chromium check (not a physical device): a payload-free push delivered through the DevTools protocol made the worker ask, sign in with the paired non-extractable key (the stand-in server verified the signature) and ask again with the new session cookie; it then showed "Du bist am Zug.", or both sentences, or the neutral sentence when the server answered 503. Headless Chromium itself cannot display notifications, so the shown text was recorded by replacing `showNotification` in the test.
 
 | Message from | to | Notice to |
 |---|---|---|

@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const {keyBytes, situation, outcome, message, buttons} = require("./push-utils.js");
+const {keyBytes, situation, outcome, message, buttons, noticeText, NEUTRAL} = require("./push-utils.js");
 
 test("the public key becomes the 65 bytes of an uncompressed P-256 point", () => {
   const raw = new Uint8Array(65).fill(7);
@@ -48,5 +48,17 @@ test("every state has a German message and sensible buttons", () => {
   assert.deepEqual(buttons("failed_off"), {on: false, off: true});
   for (const state of ["working", "install", "unsupported", "denied", "signed_out"]) {
     assert.deepEqual(buttons(state), {on: false, off: false}, state);
+  }
+});
+
+test("a notice says only what is waiting, in fixed sentences", () => {
+  assert.equal(noticeText({message: true}), "Du hast eine neue Nachricht.");
+  assert.equal(noticeText({turn: true}), "Du bist am Zug.");
+  assert.equal(noticeText({invite: true}), "Du wurdest zu einer Schachpartie eingeladen.");
+  assert.equal(noticeText({message: true, turn: true, invite: true}),
+    "Du hast eine neue Nachricht. Du bist am Zug. Du wurdest zu einer Schachpartie eingeladen.");
+  // Nothing known, or anything odd: the neutral sentence, never server text.
+  for (const odd of [{}, null, undefined, "turn", {turn: "yes"}, {turn: 1}, {other: true}, {text: "Hallo"}]) {
+    assert.equal(noticeText(odd), NEUTRAL);
   }
 });

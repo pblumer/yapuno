@@ -25,10 +25,39 @@ const (
 	requestTimeout = 10 * time.Second
 )
 
-// Authorizer reports whether this device of this child may read the
-// conversation right now. It must use the same current-state predicates as
-// reading the conversation.
-type Authorizer func(d Device, conversationID string) bool
+// Kind is what a notice is about. A push carries no data; the device asks
+// the server afterwards which kinds were delivered to it (Take).
+type Kind uint8
+
+const (
+	// KindMessage: a message was stored in a conversation.
+	KindMessage Kind = 1 << iota
+	// KindTurn: it is the child's move in a game.
+	KindTurn
+	// KindInvite: the child was invited to a game.
+	KindInvite
+
+	allKinds = KindMessage | KindTurn | KindInvite
+)
+
+// Notice is one reason to tell a child: its kind and the conversation or
+// game scope it concerns.
+type Notice struct {
+	Kind Kind
+	ID   string
+}
+
+// NoticeLifetime is how long a device can ask what it was told; the same
+// as a push service keeps an undelivered push.
+const NoticeLifetime = 12 * time.Hour
+
+// maxTold bounds the devices remembered as told.
+const maxTold = 4096
+
+// Authorizer reports whether this device of this child may be told about
+// the notice right now. It must use the same current-state predicates as
+// reading the conversation or playing the game.
+type Authorizer func(d Device, n Notice) bool
 
 // Doer sends one HTTP request.
 type Doer interface {
@@ -47,8 +76,14 @@ type Notifier struct {
 	logf   func(format string, args ...any)
 
 	mu      sync.Mutex
-	pending map[child]map[string]bool
+	pending map[child]map[Notice]bool
+	told    map[Device]told
 	wake    chan struct{}
+}
+
+type told struct {
+	kinds Kind
+	at    time.Time
 }
 
 // NewNotifier needs every part; there is no default.
@@ -57,7 +92,7 @@ func NewNotifier(store *Store, key *Key, may Authorizer, client Doer, now func()
 		return nil, errors.New("push notifier needs a store, a key, an authorizer, a client and a clock")
 	}
 	return &Notifier{store: store, key: key, may: may, client: client, now: now, logf: log.Printf,
-		pending: map[child]map[string]bool{}, wake: make(chan struct{}, 1)}, nil
+		pending: map[child]map[Notice]bool{}, told: map[Device]told{}, wake: make(chan struct{}, 1)}, nil
 }
 
 // NewClient returns the HTTP client for push services: a short timeout and
@@ -73,7 +108,13 @@ func NewClient() *http.Client {
 // notices for the same child are merged, and a full queue drops the notice.
 // Whether a device is told is decided at delivery from current state.
 func (n *Notifier) Notify(tenantID, childID, conversationID string) {
-	if tenantID == "" || childID == "" || conversationID == "" {
+	n.Send(tenantID, childID, Notice{Kind: KindMessage, ID: conversationID})
+}
+
+// Send is Notify for any kind of notice.
+func (n *Notifier) Send(tenantID, childID string, notice Notice) {
+	if tenantID == "" || childID == "" || notice.ID == "" || notice.Kind == 0 || notice.Kind&^allKinds != 0 ||
+		notice.Kind&(notice.Kind-1) != 0 {
 		return
 	}
 	c := child{tenantID, childID}
@@ -85,10 +126,10 @@ func (n *Notifier) Notify(tenantID, childID, conversationID string) {
 			n.logf("push notice dropped: queue full")
 			return
 		}
-		conversations = map[string]bool{}
+		conversations = map[Notice]bool{}
 		n.pending[c] = conversations
 	}
-	conversations[conversationID] = true
+	conversations[notice] = true
 	n.mu.Unlock()
 	select {
 	case n.wake <- struct{}{}:
@@ -113,7 +154,7 @@ func (n *Notifier) Run(ctx context.Context) {
 func (n *Notifier) Flush(ctx context.Context) {
 	n.mu.Lock()
 	batch := n.pending
-	n.pending = map[child]map[string]bool{}
+	n.pending = map[child]map[Notice]bool{}
 	n.mu.Unlock()
 	children := make([]child, 0, len(batch))
 	for c := range batch {
@@ -130,7 +171,7 @@ func (n *Notifier) Flush(ctx context.Context) {
 	}
 }
 
-func (n *Notifier) deliver(ctx context.Context, c child, conversations map[string]bool) {
+func (n *Notifier) deliver(ctx context.Context, c child, notices map[Notice]bool) {
 	for _, sub := range n.store.subscriptions(c.tenantID, c.childID) {
 		d := sub.Device
 		if _, ok := n.store.devices.ActiveDevice(d.TenantID, d.ChildID, d.DeviceID); !ok {
@@ -140,14 +181,15 @@ func (n *Notifier) deliver(ctx context.Context, c child, conversations map[strin
 			}
 			continue
 		}
-		allowed := false
-		for id := range conversations {
-			if n.may(d, id) {
-				allowed = true
-				break
+		var kinds Kind
+		for notice := range notices {
+			if kinds&notice.Kind == 0 && n.may(d, notice) {
+				kinds |= notice.Kind
 			}
 		}
-		if allowed {
+		if kinds != 0 {
+			// Recorded before the push, so the device finds it when it asks.
+			n.record(d, kinds)
 			n.send(ctx, sub)
 		}
 	}
@@ -187,4 +229,40 @@ func (n *Notifier) send(ctx context.Context, sub subscription) {
 	default:
 		n.logf("push notice not delivered: push service answered %d", resp.StatusCode)
 	}
+}
+
+// record remembers what a device was told, merged with what it has not
+// asked for yet.
+func (n *Notifier) record(d Device, kinds Kind) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	now := n.now()
+	if prev, ok := n.told[d]; ok && now.Sub(prev.at) < NoticeLifetime {
+		kinds |= prev.kinds
+	}
+	if _, ok := n.told[d]; !ok && len(n.told) >= maxTold {
+		for k, t := range n.told {
+			if now.Sub(t.at) >= NoticeLifetime {
+				delete(n.told, k)
+			}
+		}
+		if len(n.told) >= maxTold {
+			n.logf("push notice kinds not kept: too many devices")
+			return
+		}
+	}
+	n.told[d] = told{kinds: kinds, at: now}
+}
+
+// Take returns what the device was told and has not asked for yet, and
+// forgets it. Only the device's own verified session may ask.
+func (n *Notifier) Take(d Device) Kind {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	t, ok := n.told[d]
+	delete(n.told, d)
+	if !ok || n.now().Sub(t.at) >= NoticeLifetime {
+		return 0
+	}
+	return t.kinds
 }

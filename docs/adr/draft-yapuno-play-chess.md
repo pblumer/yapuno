@@ -115,7 +115,7 @@ Chosen options (if approved): **own rules engine, polling, clock from server tim
 ### Not decided here
 - **Playtime quota.** The quota policy of issue #19 is not enforced in this slice. A time-based quota does not fit correspondence games that last days; options are a daily number of moves or games, or a quota for live games only. This needs a product decision and its own ADR.
 - Games between siblings, with guardians of other families, or in groups.
-- Notifications ("you are to move"), push, and a realtime transport.
+- A realtime transport. Notifications for invitations and turns are sent as content-free Web Push where that is switched on ([Web Push ADR draft](draft-web-push.md)).
 - Other games.
 
 ### Consequences
