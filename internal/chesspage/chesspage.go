@@ -43,6 +43,7 @@ type Square struct {
 	Rank   string // rank number on the left column, else ""
 	Holder bool   // the square holds a piece of the viewer
 	Check  bool   // the king on this square is in check
+	Hint   bool   // part of the move a tip suggests
 }
 
 // Clock is one side's clock.
@@ -91,6 +92,15 @@ type Page struct {
 	Sig      string
 	PollMS   int
 	MoveText string // the text a failed no-script move keeps
+
+	Title, Subtitle, ResignText string
+	// Tips: a level-1 tip explains (TipText), a level-2 tip adds a move.
+	TipText, TipMove, TipsNote string
+	CanTip, CanTipMove         bool
+	InviteTips                 bool
+	// Practice against the computer.
+	Practice, CanStart, CanTakeback bool
+	Levels, Colors                  []ModeOption
 }
 
 var pieceNames = map[chess.PieceType]string{chess.King: "König", chess.Queen: "Dame", chess.Rook: "Turm",
@@ -147,20 +157,115 @@ func FormatClock(d time.Duration) string {
 	return fmt.Sprintf("%d:%02d", s/60, s%60)
 }
 
-// Input is what Build needs. View is nil when the contact has no game.
+// Input is what Build needs. View is nil when there is no game yet.
 type Input struct {
 	View                         *games.View
 	Peer                         string
 	PeerFigure                   template.HTML
 	Skin, Home, Path, Assets     string
 	CSRF, ClientID, Alert, Moved string
+	// Practice is set for a game against the computer; Peer is then the
+	// computer's name as it starts a sentence.
+	Practice *Practice
+}
+
+// Practice describes a game against the computer.
+type Practice struct {
+	Level       string
+	CanTakeback bool
+}
+
+var levelTexts = map[string]string{
+	"easy":   "Leicht: Der Computer macht auch Fehler",
+	"medium": "Mittel: Der Computer schaut zwei Halbzüge voraus",
+	"hard":   "Schwer: Der Computer schaut drei Halbzüge voraus",
+}
+
+var levelNames = map[string]string{"easy": "leicht", "medium": "mittel", "hard": "schwer"}
+
+func options(values []string, labels map[string]string, selected string) []ModeOption {
+	out := make([]ModeOption, 0, len(values))
+	for _, v := range values {
+		out = append(out, ModeOption{Value: v, Label: labels[v], Checked: v == selected})
+	}
+	return out
+}
+
+var possessive = map[chess.PieceType]string{chess.Queen: "Deine Dame", chess.King: "Dein König", chess.Rook: "Dein Turm",
+	chess.Bishop: "Dein Läufer", chess.Knight: "Dein Springer", chess.Pawn: "Dein Bauer"}
+
+var accusative = map[chess.PieceType]string{chess.Queen: "die Dame", chess.Rook: "den Turm", chess.Bishop: "den Läufer",
+	chess.Knight: "den Springer", chess.Pawn: "den Bauern"}
+
+// HintText explains a tip in words for a child. peer is the opponent's
+// name as it starts a sentence.
+func HintText(h chess.Hint, peer string) string {
+	switch h.Kind {
+	case chess.HintMateInOne:
+		return "Du kannst mit einem einzigen Zug schachmatt setzen. Schau dir alle Züge an, die Schach geben!"
+	case chess.HintCheck:
+		return "Dein König steht im Schach. Du kannst ihn wegziehen, eine Figur dazwischenstellen oder den Angreifer schlagen."
+	case chess.HintThreatMate:
+		return "Achtung: " + peer + " droht, dich im nächsten Zug mattzusetzen. Wie kannst du das verhindern?"
+	case chess.HintHanging:
+		return possessive[h.Piece] + " auf " + h.Square.String() + " ist in Gefahr. Bring die Figur in Sicherheit oder schütze sie."
+	case chess.HintWinPiece:
+		return "Du kannst etwas gewinnen: Schau dir " + accusative[h.Piece] + " auf " + h.Square.String() + " an."
+	case chess.HintDevelop:
+		return "Bring deine Springer und Läufer ins Spiel, zum Beispiel " + accusative[h.Piece] + " auf " + h.Square.String() + ", und kämpfe um die Mitte."
+	case chess.HintCastle:
+		return "Bring deinen König mit einer Rochade in Sicherheit."
+	}
+	return "Gerade droht keine Gefahr. Suche eine Figur, die noch wenig zu tun hat, und gib ihr eine Aufgabe."
+}
+
+// tips fills the tip part of a page where the viewer is to move.
+func tips(p *Page, v *games.View, peer string) {
+	if !v.Tips {
+		return
+	}
+	switch {
+	case v.TipsLeft < 0:
+		p.TipsNote = "Tipps: so viele du willst."
+	default:
+		p.TipsNote = fmt.Sprintf("Tipps: noch %d von %d.", v.TipsLeft, games.MaxTips)
+		if v.TheirTipsUsed > 0 {
+			p.TipsNote += fmt.Sprintf(" %s hat %d genutzt.", peer, v.TheirTipsUsed)
+		}
+	}
+	if !p.CanMove {
+		return
+	}
+	if v.Tip == nil {
+		p.CanTip = v.TipsLeft != 0
+		return
+	}
+	p.TipText = HintText(v.Tip.Hint, peer)
+	if v.Tip.Level == 1 {
+		p.CanTipMove = true
+		return
+	}
+	if v.Position.Legal(v.Tip.Best) {
+		p.TipMove = "Ein guter Zug wäre: " + Describe(v.Position, v.Tip.Best) + "."
+		for i := range p.Board {
+			if p.Board[i].Name == v.Tip.Best.From.String() || p.Board[i].Name == v.Tip.Best.To.String() {
+				p.Board[i].Hint = true
+				p.Board[i].Label += ", Tipp"
+			}
+		}
+	}
 }
 
 // Build turns a game, as the viewer sees it, into the page.
 func Build(in Input) Page {
 	p := Page{Skin: in.Skin, Peer: in.Peer, PeerFigure: in.PeerFigure, Home: in.Home, Path: in.Path, Assets: in.Assets,
-		CSRF: in.CSRF, ClientID: in.ClientID, Alert: in.Alert, MoveText: in.Moved, Sig: Signature(in.View), PollMS: 4000}
+		CSRF: in.CSRF, ClientID: in.ClientID, Alert: in.Alert, MoveText: in.Moved, Sig: Signature(in.View), PollMS: 4000,
+		Title: "Schach mit " + in.Peer, Subtitle: "Nur ihr zwei. Im Spiel gibt es keinen Chat.",
+		ResignText: "Wenn du aufgibst, hat " + in.Peer + " gewonnen."}
 	v := in.View
+	if in.Practice != nil {
+		return buildPractice(p, in)
+	}
 	if v == nil {
 		p.Status = "Ihr habt noch nie zusammen gespielt."
 		p.Detail = "Lade " + in.Peer + " zu einer Partie ein."
@@ -227,7 +332,55 @@ func Build(in Input) Page {
 		p.Status, p.Detail = endText(v, in.Peer), "Möchtest du nochmals spielen?"
 		p.CanInvite = true
 		p.Modes = modes(v.Mode)
+		p.InviteTips = v.Tips
 	}
+	tips(&p, v, in.Peer)
+	return p
+}
+
+// buildPractice builds the page of a game against the computer.
+func buildPractice(p Page, in Input) Page {
+	p.Practice, p.PollMS, p.Sig = true, 0, ""
+	p.Title, p.Subtitle = "Üben gegen den Computer", "Nur du und der Computer. Hier darfst du alles ausprobieren."
+	p.ResignText = "Wenn du aufgibst, gewinnt der Computer."
+	level := in.Practice.Level
+	p.Levels = options([]string{"easy", "medium", "hard"}, levelTexts, map[bool]string{true: level, false: "easy"}[level != ""])
+	p.Colors = options([]string{"white", "black", "random"}, map[string]string{"white": "Weiss", "black": "Schwarz", "random": "Zufall"}, "white")
+	v := in.View
+	if v == nil {
+		p.Status, p.Detail = "Spiel gegen den Computer.", "Wähle, wie stark der Computer spielen soll, und deine Farbe."
+		p.CanStart = true
+		p.Board = board(chess.NewGame().Position(), chess.White, nil)
+		return p
+	}
+	p.Ply, p.ColorText = len(v.Moves), colorText(v.YourColor)
+	p.Board = board(v.Position, v.YourColor, v.Moves)
+	p.LastMove, p.Moves = history(v, in.Peer)
+	p.CanTakeback = in.Practice.CanTakeback
+	if v.Phase == games.Finished {
+		p.Status, p.Detail = endText(v, in.Peer), "Nochmals? Du kannst auch den letzten Zug zurücknehmen."
+		if !p.CanTakeback {
+			p.Detail = "Möchtest du nochmals spielen?"
+		}
+		p.CanStart = true
+		return p
+	}
+	p.CanResign = true
+	p.Detail = "Du spielst " + p.ColorText + ". Stufe: " + levelNames[level] + "."
+	if v.YourTurn() {
+		p.Status = "Du bist am Zug."
+		if v.Position.InCheck() {
+			p.Status = "Du bist am Zug. Dein König steht im Schach!"
+		}
+		p.CanMove = true
+		legal := v.Position.LegalMoves()
+		moves := make([]string, len(legal))
+		for i, m := range legal {
+			moves[i] = m.String()
+		}
+		p.Legal = strings.Join(moves, " ")
+	}
+	tips(&p, v, in.Peer)
 	return p
 }
 
@@ -444,6 +597,9 @@ const pageCSS = `body{margin:0}
 .yp-play .yp-sq.yp-light{background-color:#f0d9b5}
 .yp-sq.yp-last{box-shadow:inset 0 0 0 3px rgba(20,85,160,.75)}
 .yp-sq.yp-check{box-shadow:inset 0 0 0 5px #c62828;background-image:radial-gradient(circle,rgba(198,40,40,.55) 0,rgba(198,40,40,0) 70%)}
+.yp-sq.yp-hint{box-shadow:inset 0 0 0 4px #2e7d32}
+.yp-tip{margin:.6rem 0;padding:.7rem .9rem;border-radius:var(--yp-radius);background:var(--yp-surface);border:2px solid #2e7d32}
+.yp-tip p{margin:.2rem 0}
 .yp-sq.yp-selected{box-shadow:inset 0 0 0 5px #1455a0}
 .yp-sq.yp-target::after{content:"";position:absolute;width:30%;height:30%;border-radius:50%;background:rgba(20,85,160,.55)}
 .yp-sq.yp-target.yp-capture::after{width:86%;height:86%;background:transparent;border:4px solid rgba(20,85,160,.7)}
@@ -479,35 +635,40 @@ const pageCSS = `body{margin:0}
 
 var page = template.Must(template.New("chess").Funcs(template.FuncMap{"args": func(p Page, kind, label, class string) actArgs {
 	return actArgs{Page: p, Kind: kind, Label: label, Class: class}
-}}).Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>Yapuno – Schach mit {{.Peer}}</title><style>{{.CSS}}</style></head><body>
+}}).Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>Yapuno – {{.Title}}</title><style>{{.CSS}}</style></head><body>
 <main class="yp-play" id="yp-play" data-yp-skin="{{.Skin}}" data-sig="{{.Sig}}" data-state="{{.Path}}/state" data-home="{{.Home}}" data-poll="{{.PollMS}}">
-<header class="yp-head"><a class="yp-back" href="{{.Home}}" aria-label="Zurück zu deiner Crew">←</a>{{.PeerFigure}}<div><h1>Schach mit {{.Peer}}</h1><p>Nur ihr zwei. Im Spiel gibt es keinen Chat.</p></div></header>
+<header class="yp-head"><a class="yp-back" href="{{.Home}}" aria-label="Zurück zu deiner Crew">←</a>{{.PeerFigure}}<div><h1>{{.Title}}</h1><p>{{.Subtitle}}</p></div></header>
 <div class="yp-wrap">
 {{if .Alert}}<p class="yp-alert" role="alert">{{.Alert}}</p>{{end}}
 <div class="yp-pad" aria-live="polite"><p class="yp-status" id="yp-status">{{.Status}}</p><p class="yp-detail" id="yp-detail">{{.Detail}}</p></div>
 {{if .Live}}<p class="yp-clock{{if .Them.Running}} yp-running{{end}}" id="yp-clock-them" data-ms="{{.Them.MS}}" data-running="{{.Them.Running}}"><span>{{.Them.Name}}</span><time>{{.Them.Text}}</time></p>{{end}}
-<div class="yp-board" id="yp-board" role="group" aria-label="Schachbrett{{if .ColorText}}, du spielst {{.ColorText}}{{end}}" data-legal="{{.Legal}}">{{range .Board}}<button type="button" class="yp-sq{{if .Light}} yp-light{{end}}{{if .Last}} yp-last{{end}}{{if .Side}} yp-{{.Side}}{{end}}{{if .Check}} yp-check{{end}}" data-square="{{.Name}}" aria-label="{{.Label}}" disabled>{{if .Glyph}}<span class="yp-piece" aria-hidden="true">{{.Glyph}}</span>{{end}}{{if .Rank}}<span class="yp-rank" aria-hidden="true">{{.Rank}}</span>{{end}}{{if .File}}<span class="yp-file" aria-hidden="true">{{.File}}</span>{{end}}</button>{{end}}</div>
+<div class="yp-board" id="yp-board" role="group" aria-label="Schachbrett{{if .ColorText}}, du spielst {{.ColorText}}{{end}}" data-legal="{{.Legal}}">{{range .Board}}<button type="button" class="yp-sq{{if .Light}} yp-light{{end}}{{if .Last}} yp-last{{end}}{{if .Side}} yp-{{.Side}}{{end}}{{if .Check}} yp-check{{end}}{{if .Hint}} yp-hint{{end}}" data-square="{{.Name}}" aria-label="{{.Label}}" disabled>{{if .Glyph}}<span class="yp-piece" aria-hidden="true">{{.Glyph}}</span>{{end}}{{if .Rank}}<span class="yp-rank" aria-hidden="true">{{.Rank}}</span>{{end}}{{if .File}}<span class="yp-file" aria-hidden="true">{{.File}}</span>{{end}}</button>{{end}}</div>
 {{if .Live}}<p class="yp-clock{{if .You.Running}} yp-running{{end}}" id="yp-clock-you" data-ms="{{.You.MS}}" data-running="{{.You.Running}}"><span>{{.You.Name}}</span><time>{{.You.Text}}</time></p>{{end}}
 <div class="yp-pad">
 <p class="yp-sr" id="yp-announce" aria-live="assertive"></p>
 {{if .LastMove}}<p class="yp-last-move">{{.LastMove}}</p>{{end}}
+{{if .TipText}}<div class="yp-tip" role="status"><p><strong>Tipp:</strong> {{.TipText}}</p>{{if .TipMove}}<p>{{.TipMove}}</p>{{end}}</div>{{end}}
+{{if or .CanTip .CanTipMove}}<div class="yp-actions">{{if .CanTip}}{{template "tip" (args .Page "1" "Tipp" "")}}{{end}}{{if .CanTipMove}}{{template "tip" (args .Page "2" "Zeig mir einen Zug" "")}}{{end}}</div>{{end}}
+{{if .TipsNote}}<p class="yp-note">{{.TipsNote}}</p>{{end}}
 {{if .CanMove}}<div class="yp-promo" id="yp-promo" hidden><p class="yp-sr">Der Bauer wird zu:</p><button type="button" data-promo="q">Dame</button><button type="button" data-promo="r">Turm</button><button type="button" data-promo="b">Läufer</button><button type="button" data-promo="n">Springer</button><button type="button" data-promo="">Abbrechen</button></div>
 <details id="yp-type"{{if .MoveText}} open{{end}}><summary>Zug eintippen</summary><form method="post" action="{{.Path}}/act" id="yp-move-form"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="game" value="{{.GameID}}"><input type="hidden" name="kind" value="move"><input type="hidden" name="ply" value="{{.Ply}}"><label for="yp-move">Von welchem Feld auf welches? Zum Beispiel e2e4</label><input type="text" id="yp-move" name="move" value="{{.MoveText}}" required maxlength="5" pattern="[a-h][1-8][a-h][1-8][qrbn]?" autocomplete="off" autocapitalize="none" spellcheck="false" enterkeyhint="go"><p class="yp-note">Wird ein Bauer zur Dame, hänge q an (Turm r, Läufer b, Springer n), zum Beispiel e7e8q.</p><button class="yp-primary" type="submit">Ziehen</button></form></details>{{end}}
-{{if or .CanAccept .CanWithdraw .CanAnswerDraw .CanOfferDraw .CanAbort}}<div class="yp-actions">
+{{if or .CanAccept .CanWithdraw .CanAnswerDraw .CanOfferDraw .CanAbort .CanTakeback}}<div class="yp-actions">
+{{if .CanTakeback}}{{template "ply" (args .Page "takeback" "Zug zurücknehmen" "")}}{{end}}
 {{if .CanAccept}}{{template "act" (args .Page "accept" "Annehmen" "yp-primary")}}{{template "act" (args .Page "decline" "Ablehnen" "")}}{{end}}
 {{if .CanWithdraw}}{{template "act" (args .Page "withdraw" "Einladung zurückziehen" "")}}{{end}}
 {{if .CanAnswerDraw}}{{template "act" (args .Page "accept_draw" "Remis annehmen" "yp-primary")}}{{template "act" (args .Page "decline_draw" "Remis ablehnen" "")}}{{end}}
-{{if and .CanOfferDraw (not .CanAnswerDraw)}}{{template "act" (args .Page "offer_draw" "Remis anbieten" "")}}{{end}}
-{{if .CanAbort}}{{template "act" (args .Page "abort" "Partie abbrechen" "")}}{{end}}
+{{if and .CanOfferDraw (not .CanAnswerDraw) (not .Practice)}}{{template "act" (args .Page "offer_draw" "Remis anbieten" "")}}{{end}}
+{{if and .CanAbort (not .Practice)}}{{template "act" (args .Page "abort" "Partie abbrechen" "")}}{{end}}
 </div>{{end}}
-{{if .CanResign}}<details><summary>Aufgeben</summary><p>Wenn du aufgibst, hat {{.Peer}} gewonnen.</p>{{template "act" (args .Page "resign" "Ja, ich gebe auf" "yp-danger")}}</details>{{end}}
-{{if .CanInvite}}<form method="post" action="{{.Path}}/invite"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><fieldset class="yp-modes"><legend class="yp-status">Wie wollt ihr spielen?</legend>{{range .Modes}}<label class="yp-choice"><input type="radio" name="mode" value="{{.Value}}"{{if .Checked}} checked{{end}} required> <span>{{.Label}}</span></label>{{end}}</fieldset><p class="yp-note">Wer Weiss spielt, entscheidet der Zufall.</p><p><button class="yp-primary" type="submit">{{.Peer}} einladen</button></p></form>{{end}}
+{{if .CanResign}}<details><summary>Aufgeben</summary><p>{{.ResignText}}</p>{{template "act" (args .Page "resign" "Ja, ich gebe auf" "yp-danger")}}</details>{{end}}
+{{if .CanInvite}}<form method="post" action="{{.Path}}/invite"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><fieldset class="yp-modes"><legend class="yp-status">Wie wollt ihr spielen?</legend>{{range .Modes}}<label class="yp-choice"><input type="radio" name="mode" value="{{.Value}}"{{if .Checked}} checked{{end}} required> <span>{{.Label}}</span></label>{{end}}</fieldset><label class="yp-choice"><input type="checkbox" name="tips" value="yes"{{if .InviteTips}} checked{{end}}> <span>Mit Tipps: Jedes Kind darf 3 Tipps pro Partie nehmen. Ihr seht beide, wer wie viele genutzt hat.</span></label><p class="yp-note">Wer Weiss spielt, entscheidet der Zufall.</p><p><button class="yp-primary" type="submit">{{.Peer}} einladen</button></p></form>{{end}}
+{{if .CanStart}}<form method="post" action="{{.Path}}/start"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><fieldset class="yp-modes"><legend class="yp-status">Wie stark soll der Computer spielen?</legend>{{range .Levels}}<label class="yp-choice"><input type="radio" name="level" value="{{.Value}}"{{if .Checked}} checked{{end}} required> <span>{{.Label}}</span></label>{{end}}</fieldset><fieldset class="yp-modes"><legend class="yp-status">Welche Farbe willst du?</legend>{{range .Colors}}<label class="yp-choice"><input type="radio" name="color" value="{{.Value}}"{{if .Checked}} checked{{end}} required> <span>{{.Label}}</span></label>{{end}}</fieldset><p><button class="yp-primary" type="submit">Neue Partie</button></p></form>{{end}}
 {{if .Moves}}<details><summary>Alle Züge</summary><ol class="yp-moves">{{range .Moves}}<li>{{.}}</li>{{end}}</ol></details>{{end}}
 <p class="yp-note">Das hier ist eine Vorschau.</p>
 </div></div></main>
 <script src="{{.Assets}}/chess-utils.js" defer></script>
 <script src="{{.Assets}}/chess.js" defer></script>
-</body></html>{{define "act"}}<form method="post" action="{{.Page.Path}}/act"><input type="hidden" name="csrf_token" value="{{.Page.CSRF}}"><input type="hidden" name="client_id" value="{{.Page.ClientID}}"><input type="hidden" name="game" value="{{.Page.GameID}}"><input type="hidden" name="kind" value="{{.Kind}}"><button type="submit"{{if .Class}} class="{{.Class}}"{{end}}>{{.Label}}</button></form>{{end}}`))
+</body></html>{{define "act"}}<form method="post" action="{{.Page.Path}}/act"><input type="hidden" name="csrf_token" value="{{.Page.CSRF}}"><input type="hidden" name="client_id" value="{{.Page.ClientID}}"><input type="hidden" name="game" value="{{.Page.GameID}}"><input type="hidden" name="kind" value="{{.Kind}}"><button type="submit"{{if .Class}} class="{{.Class}}"{{end}}>{{.Label}}</button></form>{{end}}{{define "ply"}}<form method="post" action="{{.Page.Path}}/act"><input type="hidden" name="csrf_token" value="{{.Page.CSRF}}"><input type="hidden" name="client_id" value="{{.Page.ClientID}}"><input type="hidden" name="game" value="{{.Page.GameID}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="ply" value="{{.Page.Ply}}"><button type="submit">{{.Label}}</button></form>{{end}}{{define "tip"}}<form method="post" action="{{.Page.Path}}/act"><input type="hidden" name="csrf_token" value="{{.Page.CSRF}}"><input type="hidden" name="client_id" value="{{.Page.ClientID}}"><input type="hidden" name="game" value="{{.Page.GameID}}"><input type="hidden" name="kind" value="hint"><input type="hidden" name="level" value="{{.Kind}}"><input type="hidden" name="ply" value="{{.Page.Ply}}"><button type="submit">{{.Label}}</button></form>{{end}}`))
 
 type actArgs struct {
 	Page               Page

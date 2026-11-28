@@ -192,3 +192,97 @@ func TestSquareStylesOutrankButtonStyles(t *testing.T) {
 		t.Error("square rule weaker than the button rule")
 	}
 }
+
+func TestTipsOnThePage(t *testing.T) {
+	v := view(t, games.Correspondence, chess.White)
+	v.Tips, v.TipsLeft, v.TheirTipsUsed = true, 3, 1
+	p := Build(input(v))
+	if !p.CanTip || p.CanTipMove || p.TipText != "" || p.TipsNote != "Tipps: noch 3 von 3. Mia hat 1 genutzt." {
+		t.Fatalf("before a tip: %+v", p)
+	}
+	v.Tip = &games.Tip{Level: 1, Hint: chess.Hint{Kind: chess.HintDevelop, Square: 6, Piece: chess.Knight}}
+	p = Build(input(v))
+	if p.CanTip || !p.CanTipMove || !strings.Contains(p.TipText, "den Springer auf g1") {
+		t.Fatalf("level 1: %+v", p)
+	}
+	best, _ := chess.ParseUCI("g1f3")
+	v.Tip = &games.Tip{Level: 2, Hint: v.Tip.Hint, Best: best}
+	p = Build(input(v))
+	if p.CanTipMove || p.TipMove != "Ein guter Zug wäre: Springer g1 nach f3." {
+		t.Fatalf("level 2: %+v", p)
+	}
+	marked := 0
+	for _, sq := range p.Board {
+		if sq.Hint {
+			marked++
+			if !strings.HasSuffix(sq.Label, ", Tipp") {
+				t.Errorf("label %q", sq.Label)
+			}
+		}
+	}
+	if marked != 2 {
+		t.Fatalf("marked squares: %d", marked)
+	}
+	body := render(t, p)
+	if !strings.Contains(body, `class="yp-tip" role="status"`) || !strings.Contains(body, "yp-hint") {
+		t.Fatal("tip not rendered")
+	}
+	// No tips left and none on this move: no button.
+	v.Tip, v.TipsLeft = nil, 0
+	if p := Build(input(v)); p.CanTip {
+		t.Fatal("tip offered without tips left")
+	}
+	// Not the viewer's turn: no tip.
+	v = view(t, games.Correspondence, chess.Black)
+	v.Tips, v.TipsLeft = true, 3
+	if p := Build(input(v)); p.CanTip {
+		t.Fatal("tip offered on the opponent's turn")
+	}
+	// The invitation offers tips.
+	if body := render(t, Build(input(nil))); !strings.Contains(body, `name="tips" value="yes"`) {
+		t.Fatal("no tips checkbox")
+	}
+}
+
+func TestHintTexts(t *testing.T) {
+	for kind := chess.HintMateInOne; kind <= chess.HintActivate; kind++ {
+		text := HintText(chess.Hint{Kind: kind, Square: 3, Piece: chess.Queen}, "Mia")
+		if text == "" || strings.Contains(text, "ß") {
+			t.Errorf("kind %d: %q", kind, text)
+		}
+	}
+	if got := HintText(chess.Hint{Kind: chess.HintHanging, Square: 3, Piece: chess.Queen}, "Mia"); got != "Deine Dame auf d1 ist in Gefahr. Bring die Figur in Sicherheit oder schütze sie." {
+		t.Errorf("hanging: %q", got)
+	}
+	if got := HintText(chess.Hint{Kind: chess.HintThreatMate}, "Der Computer"); !strings.HasPrefix(got, "Achtung: Der Computer droht") {
+		t.Errorf("threat: %q", got)
+	}
+}
+
+func TestPracticePage(t *testing.T) {
+	in := input(nil)
+	in.Peer, in.Path, in.Practice = "Der Computer", "/child/practice", &Practice{}
+	p := Build(in)
+	if !p.Practice || !p.CanStart || p.CanInvite || p.PollMS != 0 || len(p.Levels) != 3 || len(p.Colors) != 3 || p.Title != "Üben gegen den Computer" {
+		t.Fatalf("empty practice: %+v", p)
+	}
+	body := render(t, p)
+	if !strings.Contains(body, `action="/child/practice/start"`) || !strings.Contains(body, `data-poll="0"`) || strings.Contains(body, "/invite") {
+		t.Fatal("practice start form")
+	}
+	v := view(t, games.Correspondence, chess.White, "e2e4", "e7e5")
+	v.Tips, v.TipsLeft = true, -1
+	in.View, in.Practice = v, &Practice{Level: "medium", CanTakeback: true}
+	p = Build(in)
+	if !p.CanMove || !p.CanTakeback || !p.CanResign || p.CanOfferDraw && strings.Contains(render(t, p), "offer_draw") || !p.CanTip || p.TipsNote != "Tipps: so viele du willst." || p.Detail != "Du spielst Weiss. Stufe: mittel." {
+		t.Fatalf("running practice: %+v", p)
+	}
+	body = render(t, p)
+	if strings.Contains(body, `value="offer_draw"`) || strings.Contains(body, `value="abort"`) || !strings.Contains(body, `value="takeback"`) || !strings.Contains(body, "gewinnt der Computer") {
+		t.Fatal("practice actions")
+	}
+	v.Phase, v.End, v.Winner = games.Finished, games.EndCheckmate, chess.Black
+	if p := Build(in); p.Status != "Schachmatt. Der Computer hat gewonnen." || !p.CanStart || !p.CanTakeback {
+		t.Fatalf("lost practice: %+v", p)
+	}
+}

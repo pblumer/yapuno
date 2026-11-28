@@ -114,7 +114,9 @@
   if (document.querySelector('[data-running="true"]')) setInterval(tick, 250);
 
   // Polling: reload when anything the page shows has changed.
-  const base = Number(root.dataset.poll) || 4000;
+  // A page that cannot change by itself (practice) does not poll.
+  const base = Number(root.dataset.poll);
+  if (!(base > 0)) return;
   let failures = 0;
   let timer = null;
   async function poll() {
