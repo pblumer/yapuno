@@ -21,3 +21,19 @@ func CanPlayGame(a GameAccess) bool {
 	return c.Self.Kind == ParticipantChild && c.Peer.Kind == ParticipantChild &&
 		a.SelfGameEnabled && a.PeerGameEnabled && c.allowed()
 }
+
+// FamilyGameAccess is the current state behind one attempt to invite to,
+// act in or read a game between a guardian and that guardian's own child.
+type FamilyGameAccess struct {
+	// Chat is the state the family chat of the two would need.
+	Chat FamilyChatAccess
+	// ChildGameEnabled says the child's guardians currently allow the game.
+	ChildGameEnabled bool
+}
+
+// CanPlayFamilyGame requires everything the family chat requires and the
+// game being allowed for the child. It never reaches a child of another
+// family.
+func CanPlayFamilyGame(a FamilyGameAccess) bool {
+	return a.ChildGameEnabled && CanUseFamilyChat(a.Chat)
+}
