@@ -32,6 +32,7 @@ All state lives in one private directory (mode `0700`). The two required files a
 | `YAPUNO_GUARDIAN_CHAT_FILE` | guardians chat with their own children and with guardians of connected families ([details](guardian-chat.md)) | |
 | `YAPUNO_GUARDIAN_NAMES_FILE` | guardians choose a name for their own children and one for other parents ([details](guardian-names.md)) | guardian chat |
 | `YAPUNO_GUARDIAN_SESSIONS_FILE` | guardians can stay signed in on a device for 30 days, also across restarts ([details](guardian-sessions.md#staying-signed-in-on-a-device-optional)) | |
+| `YAPUNO_PUSH_KEY_FILE`, `YAPUNO_PUSH_SUBSCRIPTIONS_FILE` | content-free notifications to children's devices ([details](web-push.md)) | pairing and a chat; key from `yapuno-pushkey` |
 | `YAPUNO_SIGNUP_FILE` | optional: families register through an invitation and create child profiles ([details](invited-self-registration.md)); guardianship is then self-declared | |
 
 For the trial set all of them. `YAPUNO_SIGNUP_FILE` is the exception: set it only if further families should register themselves instead of being provisioned.

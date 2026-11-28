@@ -754,3 +754,38 @@ func TestPagesNeverExceedMaxPage(t *testing.T) {
 		}
 	}
 }
+
+func TestCanReadFollowsTheSameCurrentStateAsReading(t *testing.T) {
+	w := newWorld(t)
+	// Lea and Mia may read their conversation; Tim and Noah may not.
+	for p, want := range map[*Principal]bool{&w.lea: true, &w.mia: true, &w.tim: false, &w.noah: false} {
+		if got := w.store.CanRead(*p, w.chat); got != want {
+			t.Errorf("%s: CanRead=%v", p.Party.ChildID, got)
+		}
+	}
+	for _, p := range []Principal{{}, {Party: leaParty}, {Party: leaParty, DeviceID: "unknown-device"}} {
+		if w.store.CanRead(p, w.chat) {
+			t.Errorf("principal %+v may read", p)
+		}
+	}
+	if w.store.CanRead(w.lea, "") || w.store.CanRead(w.lea, "0123456789abcdef0123456789abcdef") {
+		t.Error("an unknown conversation is readable")
+	}
+	// A blocked contact may not be read by the blocked side either, exactly
+	// as History says.
+	if err := w.contacts.Block(miaParty, w.chat); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []Principal{w.lea, w.mia} {
+		_, err := w.store.History(p, w.chat, 0, 1)
+		if w.store.CanRead(p, w.chat) != (err == nil) {
+			t.Errorf("%s: CanRead disagrees with History (%v)", p.Party.ChildID, err)
+		}
+	}
+	if err := w.pairing.Revoke("anna", "family-a", "lea", w.lea.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	if w.store.CanRead(w.lea, w.chat) {
+		t.Error("a revoked device may read")
+	}
+}

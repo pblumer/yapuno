@@ -392,6 +392,15 @@ func (s *Store) History(p Principal, conversationID string, after uint64, limit 
 	return append([]Message(nil), conv.messages[start:end]...), nil
 }
 
+// CanRead reports whether the principal may read the conversation right now.
+// It is the same check as for History and Recent and returns nothing else;
+// push delivery asks it before telling a device that a message arrived.
+func (s *Store) CanRead(p Principal, conversationID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.authorize(p, conversationID, authz.CanReadConversation)
+}
+
 // Recent returns the newest messages, oldest first.
 func (s *Store) Recent(p Principal, conversationID string, limit int) ([]Message, error) {
 	s.mu.Lock()
