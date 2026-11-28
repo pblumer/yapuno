@@ -1,8 +1,8 @@
-// Package rating keeps a private chess rating per player: Elo with the
+// Package rating keeps a private chess rating per child: Elo with the
 // junior factor K = 40, starting at 1000. A child's rating is shown only to
-// that child; guardians' ratings exist only so that games against them can
-// be rated, and are shown to nobody. The computer plays at fixed,
-// uncalibrated ratings. See docs/adr/draft-yapuno-play-chess.md.
+// that child. Guardians and the computer are fixed anchors: a guardian
+// always counts as 1000 and nothing is stored about guardians; the computer
+// plays at fixed, uncalibrated ratings. See docs/adr/draft-yapuno-play-chess.md.
 //
 // Ratings live apart from games because games are deleted after their
 // retention period. Each game is rated exactly once, by its key.
@@ -51,6 +51,10 @@ const (
 // against the computer count, but they are not calibrated against any
 // official scale.
 var ComputerRatings = map[string]float64{"easy": 600, "medium": 900, "hard": 1200}
+
+// GuardianRating is what every guardian counts as. A fixed value means no
+// rating of an adult is kept.
+const GuardianRating = 1000
 
 // Player is one rated party.
 type Player struct {
@@ -141,7 +145,12 @@ func Open(path string, now func() time.Time) (*Store, error) {
 	}
 	for _, r := range f.Players {
 		p := Player{Kind: r.Kind, TenantID: r.TenantID, ID: r.ID}
-		if !p.valid() || p.Kind == ComputerKind || r.Games < 1 || math.IsNaN(r.Rating) || math.IsInf(r.Rating, 0) {
+		if p.Kind == Guardian && p.valid() {
+			// Written before guardians became an anchor: dropped, and gone
+			// from the file at the next write.
+			continue
+		}
+		if !p.valid() || p.Kind != Child || r.Games < 1 || math.IsNaN(r.Rating) || math.IsInf(r.Rating, 0) {
 			return nil, fmt.Errorf("%w: rating row", ErrInvalid)
 		}
 		if _, dup := s.players[p]; dup {
@@ -158,9 +167,20 @@ func Open(path string, now func() time.Time) (*Store, error) {
 	return s, nil
 }
 
+// anchor returns the fixed rating of a guardian or the computer.
+func anchor(p Player) (float64, bool) {
+	switch p.Kind {
+	case Guardian:
+		return GuardianRating, true
+	case ComputerKind:
+		return ComputerRatings[p.ID], true
+	}
+	return 0, false
+}
+
 func (s *Store) current(p Player) state {
-	if p.Kind == ComputerKind {
-		return state{rating: ComputerRatings[p.ID]}
+	if r, ok := anchor(p); ok {
+		return state{rating: r}
 	}
 	if st, ok := s.players[p]; ok {
 		return st
@@ -175,7 +195,7 @@ func (s *Store) Of(p Player) Rating {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.current(p)
-	return Rating{Value: int(math.Round(st.rating)), Games: st.games, Provisional: p.Kind != ComputerKind && st.games < Provisional}
+	return Rating{Value: int(math.Round(st.rating)), Games: st.games, Provisional: p.Kind == Child && st.games < Provisional}
 }
 
 func digest(key string) string {
@@ -184,9 +204,10 @@ func digest(key string) string {
 }
 
 // Record rates one finished game once. scoreA is 1 if a won, 0.5 for a
-// draw and 0 if b won. The computer's rating never changes.
+// draw and 0 if b won. Only children's ratings change.
 func (s *Store) Record(gameKey string, a, b Player, scoreA float64) error {
-	if gameKey == "" || !a.valid() || !b.valid() || a == b || (scoreA != 0 && scoreA != 0.5 && scoreA != 1) {
+	if gameKey == "" || !a.valid() || !b.valid() || a == b || (scoreA != 0 && scoreA != 0.5 && scoreA != 1) ||
+		(a.Kind != Child && b.Kind != Child) {
 		return ErrInvalid
 	}
 	s.mu.Lock()
@@ -201,10 +222,10 @@ func (s *Store) Record(gameKey string, a, b Player, scoreA float64) error {
 	for p, st := range s.players {
 		next[p] = st
 	}
-	if a.Kind != ComputerKind {
+	if a.Kind == Child {
 		next[a] = state{rating: ra.rating + K*(scoreA-ea), games: ra.games + 1}
 	}
-	if b.Kind != ComputerKind {
+	if b.Kind == Child {
 		next[b] = state{rating: rb.rating + K*((1-scoreA)-(1-ea)), games: rb.games + 1}
 	}
 	keys := map[string]time.Time{key: s.now().UTC()}
@@ -225,7 +246,7 @@ func (s *Store) PurgeChild(tenantID, childID string) error {
 	return s.purge(func(p Player) bool { return p.Kind == Child && p.TenantID == tenantID && p.ID == childID })
 }
 
-// PurgeTenant removes the ratings of every child and guardian of a family.
+// PurgeTenant removes the ratings of every child of a family.
 func (s *Store) PurgeTenant(tenantID string) error {
 	if tenantID == "" {
 		return ErrInvalid

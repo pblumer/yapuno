@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -60,10 +61,27 @@ func TestRecordUpdatesBothSidesOnce(t *testing.T) {
 	if r := s.Of(lea); r.Value != Start+K/2 || r.Games != 1 {
 		t.Fatalf("idempotent: %+v", r)
 	}
-	// A draw between equals changes nothing but counts.
-	s.Record("game:2", anna, Player{Kind: Guardian, TenantID: "family-b", ID: "bruno"}, 0.5)
-	if r := s.Of(anna); r.Value != Start || r.Games != 1 {
-		t.Fatalf("draw: %+v", r)
+	// A draw against a guardian, who is a fixed 1000, counts for the child
+	// and stores nothing about the guardian.
+	if err := s.Record("game:2", anna, mia, 0.5); err != nil {
+		t.Fatal(err)
+	}
+	if r := s.Of(anna); r.Value != Start || r.Games != 0 || r.Provisional {
+		t.Fatalf("guardian: %+v", r)
+	}
+	if r := s.Of(mia); r.Games != 2 || r.Value <= Start-K/2 {
+		t.Fatalf("child after draw against 1000: %+v", r)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), `"guardian"`) {
+		t.Fatalf("guardian stored: %s", data)
+	}
+	// A game without a child rates nobody.
+	if err := s.Record("game:3", anna, Player{Kind: Guardian, TenantID: "family-b", ID: "bruno"}, 1); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("two guardians: %v", err)
+	}
+	if err := s.Record("game:4", anna, easy, 1); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("guardian against computer: %v", err)
 	}
 	if info, _ := os.Stat(path); info.Mode().Perm() != 0600 {
 		t.Fatalf("mode %v", info.Mode())
@@ -120,15 +138,36 @@ func TestProvisionalAndPurge(t *testing.T) {
 	if r := s.Of(lea); r.Games != 0 || r.Value != Start {
 		t.Fatalf("purge child: %+v", r)
 	}
-	if r := s.Of(anna); r.Games != 1 || s.Of(sameID).Games != 1 {
-		t.Fatal("purge child removed a guardian")
+	if r := s.Of(mia); r.Games != Provisional+1 {
+		t.Fatalf("purge child touched another child: %+v", r)
 	}
 	if err := s.PurgeTenant("family-a"); err != nil {
 		t.Fatal(err)
 	}
 	s = open(t, path)
-	if s.Of(anna).Games != 0 || s.Of(mia).Games != Provisional+1 {
+	if s.Of(mia).Games != Provisional+1 {
 		t.Fatal("purge tenant")
+	}
+}
+
+// Files written before guardians became a fixed anchor may hold guardian
+// rows. They are dropped on load and gone from the file at the next write.
+func TestLegacyGuardianRowsAreDropped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ratings.json")
+	legacy := `{"players":[{"kind":"guardian","tenant_id":"family-a","id":"anna","rating":1100,"games":3},{"kind":"child","tenant_id":"family-a","id":"lea","rating":1040,"games":3}],"recorded":[]}`
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := open(t, path)
+	if r := s.Of(anna); r.Value != Start || r.Games != 0 {
+		t.Fatalf("legacy guardian row used: %+v", r)
+	}
+	if r := s.Of(lea); r.Value != 1040 {
+		t.Fatalf("child row lost: %+v", r)
+	}
+	s.Record("game:new", lea, mia, 1)
+	if data, _ := os.ReadFile(path); strings.Contains(string(data), "anna") {
+		t.Fatalf("legacy guardian row kept: %s", data)
 	}
 }
 

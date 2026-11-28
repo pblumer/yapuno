@@ -39,7 +39,7 @@ The play and games files are needed together and require pairing and contacts; t
 
 ## Private rating
 
-- Each child sees **its own** rating on its home page, with "vorläufig" for the first ten rated games and the sentence "Nur du siehst diese Zahl. Sie zeigt, wie du dich verbesserst, nicht wer besser ist." Nobody else sees it: not other children, not guardians, no list. Guardians' ratings are kept only as opponents' strength and shown to nobody.
+- Each child sees **its own** rating on its home page, with "vorläufig" for the first ten rated games and the sentence "Nur du siehst diese Zahl. Sie zeigt, wie du dich verbesserst, nicht wer besser ist." Nobody else sees it: not other children, not guardians, no list. Guardians always count as a fixed 1000; nothing is stored about them. The rating falls after a loss, on purpose.
 - Elo, K = 40, start 1000. Rated: results by the rules, resignation, time-out, agreed draw. Not rated: declined, withdrawn, expired, aborted, abandoned games, and practice games with a tip or a takeback.
 - **The computer's ratings (easy 600, medium 900, hard 1200) are uncalibrated assumptions.** The number shows a child's own progress; it is not comparable with a club or FIDE rating.
 - Each game is rated once by its key, also time-outs, when the ended game is next read or compacted; ratings outlive the deletion of games and are deleted with the child's profile or the family.
