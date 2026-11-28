@@ -277,11 +277,22 @@ func (c notifyingGuardianChat) Send(a guardianchat.Actor, id, clientID, body str
 	return msg, duplicate, err
 }
 
-// newNotifier builds the push notifier. A device is told only if its child
-// may read the conversation now, by the rules of the store that owns it.
+// newNotifier builds the push notifier. A device is told about a message
+// only if its child may read the conversation now, and about a game only if
+// its child may play there and is still waited for, by the rules of the
+// store that owns it.
 func newNotifier(opt optionalStores, now func() time.Time) (*webpush.Notifier, error) {
-	may := func(d webpush.Device, conversationID string) bool {
-		p := messages.Principal{Party: contacts.Party{TenantID: d.TenantID, ChildID: d.ChildID}, DeviceID: d.DeviceID}
+	may := func(d webpush.Device, n webpush.Notice) bool {
+		party := contacts.Party{TenantID: d.TenantID, ChildID: d.ChildID}
+		switch n.Kind {
+		case webpush.KindTurn, webpush.KindInvite:
+			return opt.games != nil && opt.games.Waiting(games.Principal{Party: party, DeviceID: d.DeviceID}, n.ID, n.Kind == webpush.KindInvite)
+		case webpush.KindMessage:
+		default:
+			return false
+		}
+		conversationID := n.ID
+		p := messages.Principal{Party: party, DeviceID: d.DeviceID}
 		if opt.guardianChat != nil && opt.guardianChat.ForChildren().Has(p, conversationID) {
 			return true
 		}
@@ -488,6 +499,16 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		var err error
 		if notifier, err = newNotifier(opt, now); err != nil {
 			return nil, err
+		}
+		// A child is told when it is invited to a game or it is its move.
+		if opt.games != nil {
+			opt.games.SetNotifier(func(g games.Notice) {
+				kind := webpush.KindTurn
+				if g.Invite {
+					kind = webpush.KindInvite
+				}
+				notifier.Send(g.TenantID, g.ChildID, webpush.Notice{Kind: kind, ID: g.Scope})
+			})
 		}
 	}
 	var locker *guardianlock.Locker
@@ -759,6 +780,9 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		}
 		if notifier != nil {
 			childOptions.Push = childweb.Push{Key: opt.pushKey, Subscriptions: opt.push}
+			if notifier != nil {
+				childOptions.Push.Notices = notifier
+			}
 		}
 		if opt.games != nil {
 			childOptions.Games = opt.games
