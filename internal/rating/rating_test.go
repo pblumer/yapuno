@@ -71,7 +71,8 @@ func TestRecordUpdatesBothSidesOnce(t *testing.T) {
 }
 
 func TestComputerIsAnAnchor(t *testing.T) {
-	s := open(t, filepath.Join(t.TempDir(), "ratings.json"))
+	path := filepath.Join(t.TempDir(), "ratings.json")
+	s := open(t, path)
 	if err := s.Record("practice:1", lea, easy, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -79,8 +80,14 @@ func TestComputerIsAnAnchor(t *testing.T) {
 	if r := s.Of(lea); r.Value <= Start || r.Value >= Start+5 {
 		t.Fatalf("against easy: %+v", r)
 	}
-	if r := s.Of(easy); r.Value != 600 || r.Games != 0 {
+	if r := s.Of(easy); r.Value != 600 || r.Games != 0 || r.Provisional {
 		t.Fatalf("computer changed: %+v", r)
+	}
+	// The computer is never written, so the file opens again.
+	s.Record("practice:2", easy, lea, 0)
+	s = open(t, path)
+	if s.Of(lea).Games != 2 {
+		t.Fatal("games after reopen")
 	}
 	if err := s.Record("x", lea, Computer("godlike"), 1); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unknown level: %v", err)
@@ -105,20 +112,22 @@ func TestProvisionalAndPurge(t *testing.T) {
 		t.Fatalf("after %d games: %+v", Provisional, r)
 	}
 	s.Record("h", anna, lea, 1)
+	sameID := Player{Kind: Guardian, TenantID: "family-a", ID: "lea"}
+	s.Record("i", sameID, mia, 1)
 	if err := s.PurgeChild("family-a", "lea"); err != nil {
 		t.Fatal(err)
 	}
 	if r := s.Of(lea); r.Games != 0 || r.Value != Start {
 		t.Fatalf("purge child: %+v", r)
 	}
-	if r := s.Of(anna); r.Games != 1 {
-		t.Fatal("purge child removed the guardian")
+	if r := s.Of(anna); r.Games != 1 || s.Of(sameID).Games != 1 {
+		t.Fatal("purge child removed a guardian")
 	}
 	if err := s.PurgeTenant("family-a"); err != nil {
 		t.Fatal(err)
 	}
 	s = open(t, path)
-	if s.Of(anna).Games != 0 || s.Of(mia).Games != Provisional {
+	if s.Of(anna).Games != 0 || s.Of(mia).Games != Provisional+1 {
 		t.Fatal("purge tenant")
 	}
 }
