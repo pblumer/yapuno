@@ -19,7 +19,7 @@ import (
 // Games stores chess games. It must authorize every call from current
 // contact, block, profile, device and guardian-enablement state.
 type Games interface {
-	Invite(p games.Principal, contactID, clientID string, mode games.Mode) (games.View, error)
+	Invite(p games.Principal, contactID, clientID string, mode games.Mode, tips bool) (games.View, error)
 	Act(p games.Principal, gameID string, a games.Action) (games.View, bool, error)
 	Game(p games.Principal, gameID string) (games.View, error)
 	Latest(p games.Principal, contactID string) (games.View, bool, error)
@@ -203,7 +203,17 @@ func (h *handler) playInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	_, err := h.opt.Games.Invite(gamePrincipal(s), id, form.Get("client_id"), games.Mode(form.Get("mode")))
+	// Tips are a checkbox: absent means no tips.
+	var tips bool
+	switch values := form["tips"]; {
+	case len(values) == 0:
+	case len(values) == 1 && values[0] == "yes":
+		tips = true
+	default:
+		http.Error(w, "Invalid form", http.StatusBadRequest)
+		return
+	}
+	_, err := h.opt.Games.Invite(gamePrincipal(s), id, form.Get("client_id"), games.Mode(form.Get("mode")), tips)
 	switch {
 	case err == nil:
 		http.Redirect(w, r, "/child/play/"+id, http.StatusSeeOther)

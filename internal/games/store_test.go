@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -148,7 +149,7 @@ func newWorld(t *testing.T) *world {
 // start invites Mia as Lea and lets Mia accept; Lea plays white.
 func (w *world) start(t *testing.T, mode Mode) View {
 	t.Helper()
-	v, err := w.store.Invite(w.lea, w.contact, w.id(), mode)
+	v, err := w.store.Invite(w.lea, w.contact, w.id(), mode, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +187,7 @@ func logSize(t *testing.T, path string) int64 {
 
 func TestInviteAcceptAndPlayToCheckmate(t *testing.T) {
 	w := newWorld(t)
-	v, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence)
+	v, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +224,7 @@ func TestInviteAcceptAndPlayToCheckmate(t *testing.T) {
 		t.Fatalf("resign after mate: %v", err)
 	}
 	// A new game may start once the last one has ended.
-	if _, err := w.store.Invite(w.mia, w.contact, w.id(), Live10); err != nil {
+	if _, err := w.store.Invite(w.mia, w.contact, w.id(), Live10, false); err != nil {
 		t.Fatalf("new game: %v", err)
 	}
 	latest, ok, err := w.store.Latest(w.lea, w.contact)
@@ -235,7 +236,7 @@ func TestInviteAcceptAndPlayToCheckmate(t *testing.T) {
 func TestColourIsChosenByTheServer(t *testing.T) {
 	w := newWorld(t)
 	w.store.coin = func() (bool, error) { return false, nil }
-	v, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence)
+	v, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence, false)
 	if err != nil || v.YourColor != chess.Black {
 		t.Fatalf("inviter colour: %+v %v", v, err)
 	}
@@ -249,7 +250,7 @@ func TestColourIsChosenByTheServer(t *testing.T) {
 		t.Fatalf("colour after restart: %+v", again)
 	}
 	w.store.coin = func() (bool, error) { return false, errors.New("no randomness") }
-	if _, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence); !errors.Is(err, ErrBusy) {
+	if _, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence, false); !errors.Is(err, ErrBusy) {
 		t.Fatalf("busy check: %v", err)
 	}
 }
@@ -287,7 +288,7 @@ func TestEveryEntryPointIsAuthorizedFromCurrentState(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := setup()
 			before := logSize(t, w.path)
-			if _, err := w.store.Invite(c.p, c.contact, w.id(), Correspondence); !errors.Is(err, ErrForbidden) {
+			if _, err := w.store.Invite(c.p, c.contact, w.id(), Correspondence, false); !errors.Is(err, ErrForbidden) {
 				t.Errorf("Invite: %v", err)
 			}
 			if _, _, err := w.store.Latest(c.p, c.contact); !errors.Is(err, ErrForbidden) {
@@ -342,7 +343,7 @@ func TestRevocationStopsTheGame(t *testing.T) {
 			if _, err := w.store.Game(w.lea, game.ID); !errors.Is(err, ErrForbidden) {
 				t.Errorf("read: %v", err)
 			}
-			if _, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence); !errors.Is(err, ErrForbidden) {
+			if _, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence, false); !errors.Is(err, ErrForbidden) {
 				t.Errorf("invite: %v", err)
 			}
 		})
@@ -351,11 +352,11 @@ func TestRevocationStopsTheGame(t *testing.T) {
 
 func TestOneUnfinishedGamePerContactAndInvitationLimit(t *testing.T) {
 	w := newWorld(t)
-	v, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence)
+	v, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.store.Invite(w.mia, w.contact, w.id(), Correspondence); !errors.Is(err, ErrBusy) {
+	if _, err := w.store.Invite(w.mia, w.contact, w.id(), Correspondence, false); !errors.Is(err, ErrBusy) {
 		t.Fatalf("second open game: %v", err)
 	}
 	if _, _, err := w.store.Act(w.mia, v.ID, Action{Kind: Withdraw, ClientID: w.id()}); !errors.Is(err, ErrNotNow) {
@@ -368,7 +369,7 @@ func TestOneUnfinishedGamePerContactAndInvitationLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 1; i < MaxInvitesPerDay; i++ {
-		v, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence)
+		v, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence, false)
 		if err != nil {
 			t.Fatalf("invitation %d: %v", i+1, err)
 		}
@@ -376,23 +377,23 @@ func TestOneUnfinishedGamePerContactAndInvitationLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence); !errors.Is(err, ErrRateLimited) {
+	if _, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence, false); !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("too many invitations: %v", err)
 	}
 	// The other child is not limited by Lea's invitations.
-	if _, err := w.store.Invite(w.mia, w.contact, w.id(), Correspondence); err != nil {
+	if _, err := w.store.Invite(w.mia, w.contact, w.id(), Correspondence, false); err != nil {
 		t.Fatalf("Mia invites: %v", err)
 	}
-	if _, err := w.store.Invite(w.lea, w.contact, w.id(), Mode("live-99")); !errors.Is(err, ErrInvalid) {
+	if _, err := w.store.Invite(w.lea, w.contact, w.id(), Mode("live-99"), false); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unknown mode: %v", err)
 	}
-	if _, err := w.store.Invite(w.lea, w.contact, "short", Correspondence); !errors.Is(err, ErrInvalid) {
+	if _, err := w.store.Invite(w.lea, w.contact, "short", Correspondence, false); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("bad client id: %v", err)
 	}
 	w.clock.advance(24 * time.Hour)
 	latest, _, _ := w.store.Latest(w.lea, w.contact)
 	w.store.Act(w.lea, latest.ID, Action{Kind: Decline, ClientID: w.id()})
-	if _, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence); err != nil {
+	if _, err := w.store.Invite(w.lea, w.contact, w.id(), Correspondence, false); err != nil {
 		t.Fatalf("a day later: %v", err)
 	}
 }
@@ -508,7 +509,7 @@ func TestLiveClock(t *testing.T) {
 	if _, _, err := w.store.Act(w.mia, game.ID, Action{Kind: Move, ClientID: w.id(), Move: "b8c6", Ply: 3}); !errors.Is(err, ErrNotNow) {
 		t.Fatalf("move after the flag: %v", err)
 	}
-	if _, err := w.store.Invite(w.mia, w.contact, w.id(), Live5); err != nil {
+	if _, err := w.store.Invite(w.mia, w.contact, w.id(), Live5, false); err != nil {
 		t.Fatalf("new game after time-out: %v", err)
 	}
 }
@@ -533,7 +534,7 @@ func TestTimeoutIsADrawWhenTheOpponentCannotMate(t *testing.T) {
 
 func TestDeadlines(t *testing.T) {
 	w := newWorld(t)
-	v, _ := w.store.Invite(w.lea, w.contact, w.id(), Correspondence)
+	v, _ := w.store.Invite(w.lea, w.contact, w.id(), Correspondence, false)
 	w.clock.advance(InviteTTL - time.Second)
 	if v, _ := w.store.Game(w.mia, v.ID); v.Phase != Invited || !v.Expires.Equal(w.clock.now().Add(time.Second)) {
 		t.Fatalf("before expiry: %+v", v)
@@ -715,7 +716,7 @@ func TestCompactionDeletesEndedAndOrphanedGames(t *testing.T) {
 	other := w.connect(t, miaParty, noahParty)
 	finished := w.start(t, Correspondence)
 	w.store.Act(w.lea, finished.ID, Action{Kind: Resign, ClientID: w.id()})
-	open, err := w.store.Invite(w.noah, other, w.id(), Correspondence)
+	open, err := w.store.Invite(w.noah, other, w.id(), Correspondence, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -743,5 +744,122 @@ func TestCompactionDeletesEndedAndOrphanedGames(t *testing.T) {
 	w.reopen(t)
 	if info, _ := os.Stat(w.path); info.Mode().Perm() != 0600 {
 		t.Fatalf("mode after compaction: %v", info.Mode())
+	}
+}
+
+func TestTips(t *testing.T) {
+	w := newWorld(t)
+	plain := w.start(t, Correspondence)
+	if plain.Tips || plain.TipsLeft != 0 {
+		t.Fatalf("tips in a game without tips: %+v", plain)
+	}
+	if _, _, err := w.store.Act(w.lea, plain.ID, Action{Kind: Hint, ClientID: w.id(), Level: 1, Ply: 0}); !errors.Is(err, ErrNotNow) {
+		t.Fatalf("tip in a game without tips: %v", err)
+	}
+	w.store.Act(w.lea, plain.ID, Action{Kind: Resign, ClientID: w.id()})
+
+	v, err := w.store.Invite(w.lea, w.contact, w.id(), Live10, true)
+	if err != nil || !v.Tips {
+		t.Fatalf("invite with tips: %+v %v", v, err)
+	}
+	game := v.ID
+	w.store.Act(w.mia, game, Action{Kind: Accept, ClientID: w.id()})
+	if v, _ := w.store.Game(w.mia, game); !v.Tips || v.TipsLeft != MaxTips {
+		t.Fatalf("invitee sees tips: %+v", v)
+	}
+	checks := []struct {
+		name string
+		p    Principal
+		a    Action
+		want error
+	}{
+		{"not your turn", w.mia, Action{Kind: Hint, Level: 1, Ply: 0}, ErrNotNow},
+		{"stale ply", w.lea, Action{Kind: Hint, Level: 1, Ply: 1}, ErrStale},
+		{"move before level 1", w.lea, Action{Kind: Hint, Level: 2, Ply: 0}, ErrNotNow},
+		{"unknown level", w.lea, Action{Kind: Hint, Level: 3, Ply: 0}, ErrInvalid},
+		{"level on a move", w.lea, Action{Kind: Move, Move: "e2e4", Level: 1, Ply: 0}, ErrInvalid},
+	}
+	for _, c := range checks {
+		c.a.ClientID = w.id()
+		if _, _, err := w.store.Act(c.p, game, c.a); !errors.Is(err, c.want) {
+			t.Errorf("%s: %v, want %v", c.name, err, c.want)
+		}
+	}
+	id := w.id()
+	v, _, err = w.store.Act(w.lea, game, Action{Kind: Hint, ClientID: id, Level: 1, Ply: 0})
+	if err != nil || v.Tip == nil || v.Tip.Level != 1 || v.Tip.Hint.Kind != chess.HintDevelop || v.TipsLeft != MaxTips-1 {
+		t.Fatalf("level 1: %+v %v", v, err)
+	}
+	if _, dup, err := w.store.Act(w.lea, game, Action{Kind: Hint, ClientID: id, Level: 1, Ply: 0}); err != nil || !dup {
+		t.Fatalf("retry: %v %v", dup, err)
+	}
+	if _, _, err := w.store.Act(w.lea, game, Action{Kind: Hint, ClientID: w.id(), Level: 1, Ply: 0}); !errors.Is(err, ErrNotNow) {
+		t.Fatalf("second level 1 on the same move: %v", err)
+	}
+	v, _, err = w.store.Act(w.lea, game, Action{Kind: Hint, ClientID: w.id(), Level: 2, Ply: 0})
+	if err != nil || v.Tip == nil || v.Tip.Level != 2 || !v.Position.Legal(v.Tip.Best) || v.TipsLeft != MaxTips-1 {
+		t.Fatalf("level 2: %+v %v", v, err)
+	}
+	// The opponent sees that a tip was used, but not which.
+	if m, _ := w.store.Game(w.mia, game); m.Tip != nil || m.TheirTipsUsed != 1 || m.TipsLeft != MaxTips {
+		t.Fatalf("opponent view: %+v", m)
+	}
+	w.reopen(t)
+	if again, _ := w.store.Game(w.lea, game); again.Tip == nil || again.Tip.Best != v.Tip.Best || again.TipsLeft != MaxTips-1 {
+		t.Fatalf("after restart: %+v", again)
+	}
+	// The tip belongs to its move only.
+	w.move(t, w.lea, game, "e2e4")
+	if again, _ := w.store.Game(w.lea, game); again.Tip != nil {
+		t.Fatal("old tip still shown")
+	}
+	for i := 0; i < MaxTips-1; i++ {
+		w.move(t, w.mia, game, []string{"e7e5", "b8c6"}[i])
+		cur, _ := w.store.Game(w.lea, game)
+		if _, _, err := w.store.Act(w.lea, game, Action{Kind: Hint, ClientID: w.id(), Level: 1, Ply: len(cur.Moves)}); err != nil {
+			t.Fatalf("tip %d: %v", i+2, err)
+		}
+		w.move(t, w.lea, game, []string{"g1f3", "f1c4"}[i])
+	}
+	w.move(t, w.mia, game, "g8f6")
+	if _, _, err := w.store.Act(w.lea, game, Action{Kind: Hint, ClientID: w.id(), Level: 1, Ply: 6}); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("fourth tip: %v", err)
+	}
+	// A stored tip must be consistent with the game on load.
+	w.store.Close()
+	data, _ := os.ReadFile(w.path)
+	bad := strings.Replace(string(data), `"level":2`, `"level":5`, 1)
+	os.WriteFile(w.path, []byte(bad), 0600)
+	if _, err := Open(w.path, w.contacts, w.pairing, w.families, w.settings, w.clock.now); err == nil {
+		t.Fatal("tampered tip opened")
+	}
+	for name, content := range map[string]string{
+		"illegal best move": regexp.MustCompile(`"best":"[a-h1-8qrbn]+"`).ReplaceAllString(string(data), `"best":"e7e5"`),
+		"tip removed":       regexp.MustCompile(`,"tip":\{[^}]*\}`).ReplaceAllString(string(data), ""),
+	} {
+		if content == string(data) {
+			t.Fatalf("%s: replacement did not apply", name)
+		}
+		os.WriteFile(w.path, []byte(content), 0600)
+		if _, err := Open(w.path, w.contacts, w.pairing, w.families, w.settings, w.clock.now); err == nil {
+			t.Errorf("%s: opened", name)
+		}
+	}
+	os.WriteFile(w.path, data, 0600)
+	w.store = nil
+	w.reopen(t)
+}
+
+func TestInvitationRetryMustMatchTips(t *testing.T) {
+	w := newWorld(t)
+	id := w.id()
+	if _, err := w.store.Invite(w.lea, w.contact, id, Correspondence, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.store.Invite(w.lea, w.contact, id, Correspondence, false); !errors.Is(err, ErrConflict) {
+		t.Fatalf("same id without tips: %v", err)
+	}
+	if v, err := w.store.Invite(w.lea, w.contact, id, Correspondence, true); err != nil || !v.Tips {
+		t.Fatalf("retry: %+v %v", v, err)
 	}
 }

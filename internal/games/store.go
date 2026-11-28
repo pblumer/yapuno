@@ -63,6 +63,10 @@ const (
 	MaxInvitesPerDay = 5
 	// MaxDrawOffers limits one player's draw offers in one game.
 	MaxDrawOffers = 3
+	// MaxTips is how many tips each player may take in a game with tips.
+	MaxTips = 3
+	// tipNodes bounds the search behind a level-2 tip.
+	tipNodes = 60000
 
 	maxLogBytes = 64 << 20
 )
@@ -142,18 +146,28 @@ const (
 	AcceptDraw  ActionKind = "accept_draw"
 	DeclineDraw ActionKind = "decline_draw"
 	Abort       ActionKind = "abort"
+	// Hint asks for a tip: Level 1 explains, Level 2 names a move.
+	Hint ActionKind = "hint"
 )
 
 var knownActions = map[ActionKind]bool{Accept: true, Decline: true, Withdraw: true, Move: true, Resign: true,
-	OfferDraw: true, AcceptDraw: true, DeclineDraw: true, Abort: true}
+	OfferDraw: true, AcceptDraw: true, DeclineDraw: true, Abort: true, Hint: true}
 
-// Action is one request of a player. Move and Ply are used by Move only:
-// Ply is the number of half-moves the client has seen.
+// Action is one request of a player. Ply, the number of half-moves the
+// client has seen, is used by Move and Hint; Move by Move; Level by Hint.
 type Action struct {
 	Kind     ActionKind
 	ClientID string
 	Move     string
 	Ply      int
+	Level    int
+}
+
+// Tip is a tip a player took on one move. Best is set from level 2.
+type Tip struct {
+	Level int
+	Hint  chess.Hint
+	Best  chess.Move
 }
 
 // Principal is a child on one device, taken from a verified child session.
@@ -208,6 +222,13 @@ type View struct {
 	// Expires is when an invitation lapses or a running game is abandoned.
 	Expires time.Time
 	EndedAt time.Time
+	// Tips says the game was started with tips. TipsLeft is the viewer's
+	// remaining tips, TheirTipsUsed how many the other player took. Tip is
+	// the viewer's own tip on the current move, if any.
+	Tips          bool
+	TipsLeft      int
+	TheirTipsUsed int
+	Tip           *Tip
 }
 
 // YourTurn reports whether the viewer is to move in a running game.
@@ -231,9 +252,20 @@ type entry struct {
 	PeerChildID  string `json:"peer_child_id,omitempty"`
 	Mode         Mode   `json:"mode,omitempty"`
 	InviterColor string `json:"inviter_color,omitempty"`
-	// Move only.
-	Move string `json:"move,omitempty"`
-	Ply  int    `json:"ply,omitempty"`
+	Tips         bool   `json:"tips,omitempty"`
+	// Move and hint.
+	Move  string     `json:"move,omitempty"`
+	Ply   int        `json:"ply,omitempty"`
+	Level int        `json:"level,omitempty"`
+	Tip   *storedTip `json:"tip,omitempty"`
+}
+
+// storedTip is the content of a tip as computed when it was taken.
+type storedTip struct {
+	Kind   uint8  `json:"kind"`
+	Square int8   `json:"square"`
+	Piece  uint8  `json:"piece"`
+	Best   string `json:"best,omitempty"`
 }
 
 const typeInvite = "invite"
@@ -260,6 +292,9 @@ type game struct {
 	last             time.Time // time of the last stored action
 	seq              uint64
 	entries          []entry
+	tips             bool
+	tipsUsed         [3]int
+	tipAt            [3]map[int]*Tip // by colour, then half-move
 }
 
 func (g *game) colorOf(p contacts.Party) chess.Color {
@@ -448,8 +483,12 @@ func (s *Store) load(line []byte) error {
 		return fmt.Errorf("%w: sequence", ErrInvalid)
 	}
 	a := Action{Kind: ActionKind(e.Type), ClientID: e.ClientID, Move: e.Move, Ply: e.Ply}
+	a.Level = e.Level
 	if err := g.check(e.actor(), a, e.At); err != nil {
 		return fmt.Errorf("%w: stored action: %v", ErrInvalid, err)
+	}
+	if (a.Kind == Hint) != (e.Tip != nil) || a.Kind == Hint && !validTip(g.rules.Position(), e) {
+		return fmt.Errorf("%w: stored tip", ErrInvalid)
 	}
 	g.apply(e)
 	s.remember(g, e)
@@ -469,24 +508,27 @@ func newGame(e entry) (*game, error) {
 	color := map[string]chess.Color{"white": chess.White, "black": chess.Black}[e.InviterColor]
 	if e.Contact == "" || len(e.Contact) > 128 || inviter.TenantID == "" || inviter.ChildID == "" ||
 		invitee.TenantID == "" || invitee.ChildID == "" || inviter == invitee || !e.Mode.valid() ||
-		color == chess.NoColor || e.Move != "" || e.Ply != 0 {
+		color == chess.NoColor || e.Move != "" || e.Ply != 0 || e.Level != 0 || e.Tip != nil {
 		return nil, fmt.Errorf("%w: invitation", ErrInvalid)
 	}
 	g := &game{id: e.Game, contact: e.Contact, inviter: inviter, invitee: invitee, inviterColor: color,
 		mode: e.Mode, created: e.At, phase: Invited, rules: chess.NewGame(), last: e.At, seq: 1,
-		entries: []entry{e}}
+		entries: []entry{e}, tips: e.Tips}
+	g.tipAt[chess.White], g.tipAt[chess.Black] = map[int]*Tip{}, map[int]*Tip{}
 	base, _, _ := e.Mode.Clock()
 	g.left[chess.White], g.left[chess.Black] = base, base
 	return g, nil
 }
 
-func fingerprint(a Action) string { return string(a.Kind) + " " + a.Move + " " + fmt.Sprint(a.Ply) }
+func fingerprint(a Action) string {
+	return fmt.Sprintf("%s %s %d %d", a.Kind, a.Move, a.Ply, a.Level)
+}
 
 func (s *Store) remember(g *game, e entry) {
 	scope := g.id
-	fp := fingerprint(Action{Kind: ActionKind(e.Type), Move: e.Move, Ply: e.Ply})
+	fp := fingerprint(Action{Kind: ActionKind(e.Type), Move: e.Move, Ply: e.Ply, Level: e.Level})
 	if e.Type == typeInvite {
-		scope, fp = "invite:"+g.contact, string(e.Mode)
+		scope, fp = "invite:"+g.contact, inviteFingerprint(e.Mode, e.Tips)
 	}
 	s.keys[idempotencyKey{scope, e.actor(), e.ClientID}] = keyed{game: g.id, fingerprint: fp}
 }
@@ -497,7 +539,10 @@ func (g *game) check(actor contacts.Party, a Action, now time.Time) error {
 	if color == chess.NoColor || !knownActions[a.Kind] {
 		return ErrInvalid
 	}
-	if a.Kind != Move && (a.Move != "" || a.Ply != 0) {
+	if a.Kind != Move && a.Move != "" || a.Kind != Move && a.Kind != Hint && a.Ply != 0 {
+		return ErrInvalid
+	}
+	if a.Kind == Hint && a.Level != 1 && a.Level != 2 || a.Kind != Hint && a.Level != 0 {
 		return ErrInvalid
 	}
 	if end, _, _ := g.settle(now); end != "" {
@@ -549,8 +594,51 @@ func (g *game) check(actor contacts.Party, a Action, now time.Time) error {
 		if g.phase != Running || g.offer != other {
 			return ErrNotNow
 		}
+	case Hint:
+		if g.phase != Running || !g.tips {
+			return ErrNotNow
+		}
+		if a.Ply != len(g.moveAt) {
+			return ErrStale
+		}
+		if g.rules.Position().Turn() != color {
+			return ErrNotNow
+		}
+		taken := g.tipAt[color][a.Ply]
+		if a.Level == 1 && taken != nil || a.Level == 2 && (taken == nil || taken.Level != 1) {
+			return ErrNotNow
+		}
+		if a.Level == 1 && g.tipsUsed[color] >= MaxTips {
+			return ErrRateLimited
+		}
 	}
 	return nil
+}
+
+// computeTip works out the content of a tip for the current position.
+func computeTip(pos chess.Position, level int) *storedTip {
+	h := chess.Analyze(pos)
+	t := &storedTip{Kind: uint8(h.Kind), Square: int8(h.Square), Piece: uint8(h.Piece)}
+	if level == 2 {
+		if m, _, ok := chess.Search(pos, chess.SearchOptions{Depth: 3, Quiescence: true, NodeLimit: tipNodes}); ok {
+			t.Best = m.String()
+		}
+	}
+	return t
+}
+
+// validTip checks the shape of a stored tip against the position it was
+// taken in.
+func validTip(pos chess.Position, e entry) bool {
+	t := e.Tip
+	if t == nil || t.Kind == uint8(chess.HintNone) || t.Kind > uint8(chess.HintActivate) || t.Square < 0 || t.Square > 63 || t.Piece > uint8(chess.King) {
+		return false
+	}
+	if e.Level == 1 {
+		return t.Best == ""
+	}
+	m, err := chess.ParseUCI(t.Best)
+	return err == nil && pos.Legal(m)
 }
 
 var ruleEnds = map[chess.StatusKind]End{chess.Checkmate: EndCheckmate, chess.Stalemate: EndStalemate,
@@ -594,6 +682,14 @@ func (g *game) apply(e entry) {
 		finish(EndAgreed, chess.NoColor)
 	case DeclineDraw:
 		g.offer = chess.NoColor
+	case Hint:
+		tip := &Tip{Level: e.Level, Hint: chess.Hint{Kind: chess.HintKind(e.Tip.Kind), Square: chess.Square(e.Tip.Square), Piece: chess.PieceType(e.Tip.Piece)}}
+		if e.Level == 1 {
+			g.tipsUsed[color]++
+		} else {
+			tip.Best, _ = chess.ParseUCI(e.Tip.Best)
+		}
+		g.tipAt[color][e.Ply] = tip
 	}
 	g.seq, g.last = e.Seq, e.At
 	g.entries = append(g.entries, e)
@@ -663,6 +759,14 @@ func (s *Store) view(g *game, self contacts.Party, now time.Time) View {
 			v.Running = turn
 		}
 	}
+	if g.tips {
+		me := v.YourColor
+		v.Tips, v.TipsLeft, v.TheirTipsUsed = true, MaxTips-g.tipsUsed[me], g.tipsUsed[me.Other()]
+		if t := g.tipAt[me][len(g.moveAt)]; t != nil && end == "" {
+			copied := *t
+			v.Tip = &copied
+		}
+	}
 	switch {
 	case end != "":
 	case g.phase == Invited:
@@ -690,9 +794,12 @@ func newGameID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
+func inviteFingerprint(mode Mode, tips bool) string { return fmt.Sprintf("%s %t", mode, tips) }
+
 // Invite starts a game with the other child of a contact. The inviter's
-// colour is chosen by the server.
-func (s *Store) Invite(p Principal, contactID, clientID string, mode Mode) (View, error) {
+// colour is chosen by the server; tips says whether both players may take
+// tips.
+func (s *Store) Invite(p Principal, contactID, clientID string, mode Mode, tips bool) (View, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	peer, ok := s.authorize(p, contactID)
@@ -704,7 +811,7 @@ func (s *Store) Invite(p Principal, contactID, clientID string, mode Mode) (View
 	}
 	now := s.now().UTC()
 	if k, seen := s.keys[idempotencyKey{"invite:" + contactID, p.Party, clientID}]; seen {
-		if k.fingerprint != string(mode) {
+		if k.fingerprint != inviteFingerprint(mode, tips) {
 			return View{}, ErrConflict
 		}
 		return s.view(s.games[k.game], p.Party, now), nil
@@ -738,7 +845,7 @@ func (s *Store) Invite(p Principal, contactID, clientID string, mode Mode) (View
 	}
 	e := entry{Game: id, Seq: 1, At: now, Type: typeInvite, TenantID: p.Party.TenantID, ChildID: p.Party.ChildID,
 		ClientID: clientID, Contact: contactID, PeerTenantID: peer.TenantID, PeerChildID: peer.ChildID,
-		Mode: mode, InviterColor: colorName(color)}
+		Mode: mode, InviterColor: colorName(color), Tips: tips}
 	g, err := newGame(e)
 	if err != nil {
 		return View{}, err
@@ -775,7 +882,10 @@ func (s *Store) Act(p Principal, gameID string, a Action) (View, bool, error) {
 		return View{}, false, err
 	}
 	e := entry{Game: gameID, Seq: g.seq + 1, At: at, Type: string(a.Kind), TenantID: p.Party.TenantID,
-		ChildID: p.Party.ChildID, ClientID: a.ClientID, Move: a.Move, Ply: a.Ply}
+		ChildID: p.Party.ChildID, ClientID: a.ClientID, Move: a.Move, Ply: a.Ply, Level: a.Level}
+	if a.Kind == Hint {
+		e.Tip = computeTip(g.rules.Position(), a.Level)
+	}
 	if err := s.append(e); err != nil {
 		return View{}, false, ErrUnavailable
 	}
