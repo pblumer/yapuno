@@ -1,7 +1,7 @@
 # ADR-DRAFT: Chess between approved contacts, played live or by correspondence
 
 - **Status:** Proposed
-- **Implementation:** Not started
+- **Implementation:** First slice on a branch (pending review): rules engine, guardian switch, game store, child chess page and guardian games page as a synthetic browser preview; see [chess preview](../planning/chess-preview.md). No quota, no notifications, no real-device evidence.
 - **Date:** 2026-11-28
 - **Deciders:** maintainers; child-safety, privacy and accessibility review required before real use
 
@@ -64,7 +64,7 @@ Chosen options (if approved): **own rules engine, polling, clock from server tim
 ### Clock rules (live games)
 - Each side's first move is untimed, so a live game does not start losing time while the other child is still finding the page. The clock of the side to move runs from the server time of the previous move.
 - After a move, the mover's remaining time is reduced by the time used and increased by the increment.
-- A side whose remaining time is zero or less at the server's current time has lost on time (draw if the opponent has insufficient material). The end is computed whenever the game is read and written to the log by the next action on that game or at compaction. A move that arrives after the flag fell is refused.
+- A side whose remaining time is zero or less at the server's current time has lost on time (draw if the opponent cannot mate). The end is derived from the recorded server times whenever the game is read or acted on; because the moment the flag fell follows from the log alone, nothing is written for it. The same holds for expired invitations and abandoned games. A move that arrives after the flag fell is refused.
 - Clocks shown in the browser are a projection of the server state; they are never sent back.
 
 ### Storage and durability
