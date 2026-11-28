@@ -256,3 +256,24 @@ func placement(pc Piece, s Square) int {
 	}
 	return 0
 }
+
+// ScoreMoves scores every legal move from the mover's view to o.Depth
+// half-moves, without pruning at the root, so scores can be compared. When
+// the node limit stops it, only the moves scored so far are returned.
+func ScoreMoves(p Position, o SearchOptions) ([]Move, []int) {
+	moves := p.LegalMoves()
+	orderMoves(p, moves)
+	if o.Depth < 1 {
+		o.Depth = 1
+	}
+	s := &searcher{limit: o.NodeLimit, quiesce: o.Quiescence}
+	scores := make([]int, 0, len(moves))
+	for _, m := range moves {
+		score := -s.negamax(p.apply(m), o.Depth-1, -2*MateScore, 2*MateScore, 1)
+		if s.aborted {
+			return moves[:len(scores)], scores
+		}
+		scores = append(scores, score)
+	}
+	return moves, scores
+}
