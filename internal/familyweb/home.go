@@ -33,10 +33,11 @@ var homePage = template.Must(template.New("home").Parse(`<!doctype html><html la
 {{if .Alert}}<p class="yp-alert" role="alert">{{.Alert}}</p>{{end}}
 {{if .Notice}}<p class="yp-status" role="status">{{.Notice}}</p>{{end}}
 {{range .Children}}<section aria-labelledby="yp-child-{{.N}}"><h2 id="yp-child-{{.N}}">{{.Name}}</h2>
-{{if or .Devices .Contacts .Chat .Games}}<ul class="yp-rows">
+{{if or .Devices .Contacts .Chat .Games .Play}}<ul class="yp-rows">
 {{if .Devices}}<li><a href="/family/devices?child_id={{.ID}}"><span>Geräte von {{.Name}}<small>Handy oder Tablet verbinden und verwalten</small></span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 {{if .Contacts}}<li><a href="/family/contacts?child_id={{.ID}}"><span>Kontakte von {{.Name}}<small>{{if .Reports}}{{.Reports}}{{else}}Mit Kindern anderer Familien verbinden{{end}}</small></span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 {{if .Chat}}<li><a href="/family/chat/{{.Chat}}"><span>Mit {{.Name}} schreiben</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
+{{if .Play}}<li><a href="/family/play/{{.ID}}"><span>Schach mit {{.Name}}<small>{{if .PlayNote}}{{.PlayNote}}{{else}}Gegeneinander spielen{{end}}</small></span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 {{if .Games}}<li><a href="/family/games?child_id={{.ID}}"><span>Spiele von {{.Name}}<small>Schach erlauben oder nicht</small></span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 {{if .Devices}}<li><a href="/family/devices/lost?child_id={{.ID}}"><span>Gerät von {{.Name}} verloren?</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 </ul>{{end}}{{if not (or .Devices .Contacts)}}<p class="yp-muted">{{if .Full}}Geräte und Kontakte sind auf dieser Installation nicht eingeschaltet.{{else}}Für dieses Profil hast du keine Verwaltungsrechte.{{end}}</p>{{end}}
@@ -112,6 +113,8 @@ type homeChild struct {
 	Contacts bool
 	Full     bool
 	Games    bool
+	Play     bool   // chess with this child is possible right now
+	PlayNote string // "Einladung", "Du bist am Zug" or empty
 	Chat     string // id of the guardian's conversation with this child
 	Reports  string
 }
@@ -159,6 +162,8 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 			Contacts: h.contactsEnabled && c.Permissions.ApproveContacts,
 			Full:     c.Permissions.ManageDevices && c.Permissions.ApproveContacts,
 			Games:    h.gamesEnabled && c.Permissions.ApproveContacts,
+			Play:     h.canPlay(p, c.ID),
+			PlayNote: h.playNote(p, c.ID),
 			Chat:     chats[c.ID], Reports: reports[c.ID]})
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -182,4 +187,30 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 		LookEnabled: h.looks != nil, SecurityEnabled: h.securityEnabled,
 		CanAddChild: h.children != nil && full, CanInvite: h.inviteEnabled && full,
 		InviteConnects: h.inviteEnabled && full && h.contactsEnabled})
+}
+
+// canPlay reports whether the guardian may play chess with the child now.
+func (h *handler) canPlay(p Session, child string) bool {
+	if h.familyGames == nil {
+		return false
+	}
+	_, _, err := h.familyGames.GuardianLatest(principalOf(p), child)
+	return err == nil
+}
+
+// playNote says what is waiting in the guardian's game with the child.
+func (h *handler) playNote(p Session, child string) string {
+	if h.familyGames == nil {
+		return ""
+	}
+	v, found, err := h.familyGames.GuardianLatest(principalOf(p), child)
+	switch {
+	case err != nil || !found:
+		return ""
+	case v.YourTurnToAnswer():
+		return "Einladung"
+	case v.YourTurn():
+		return "Du bist am Zug"
+	}
+	return ""
 }

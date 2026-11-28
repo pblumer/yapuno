@@ -94,6 +94,7 @@ type Page struct {
 	MoveText string // the text a failed no-script move keeps
 
 	Title, Subtitle, ResignText string
+	HomeLabel                  string
 	// Tips: a level-1 tip explains (TipText), a level-2 tip adds a move.
 	TipText, TipMove, TipsNote string
 	CanTip, CanTipMove         bool
@@ -167,6 +168,8 @@ type Input struct {
 	// Practice is set for a game against the computer; Peer is then the
 	// computer's name as it starts a sentence.
 	Practice *Practice
+	// HomeLabel names the back link; empty means the child's crew.
+	HomeLabel string
 }
 
 // Practice describes a game against the computer.
@@ -261,7 +264,10 @@ func Build(in Input) Page {
 	p := Page{Skin: in.Skin, Peer: in.Peer, PeerFigure: in.PeerFigure, Home: in.Home, Path: in.Path, Assets: in.Assets,
 		CSRF: in.CSRF, ClientID: in.ClientID, Alert: in.Alert, MoveText: in.Moved, Sig: Signature(in.View), PollMS: 4000,
 		Title: "Schach mit " + in.Peer, Subtitle: "Nur ihr zwei. Im Spiel gibt es keinen Chat.",
-		ResignText: "Wenn du aufgibst, hat " + in.Peer + " gewonnen."}
+		ResignText: "Wenn du aufgibst, hat " + in.Peer + " gewonnen.", HomeLabel: in.HomeLabel}
+	if p.HomeLabel == "" {
+		p.HomeLabel = "Zurück zu deiner Crew"
+	}
 	v := in.View
 	if in.Practice != nil {
 		return buildPractice(p, in)
@@ -637,7 +643,7 @@ var page = template.Must(template.New("chess").Funcs(template.FuncMap{"args": fu
 	return actArgs{Page: p, Kind: kind, Label: label, Class: class}
 }}).Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>Yapuno – {{.Title}}</title><style>{{.CSS}}</style></head><body>
 <main class="yp-play" id="yp-play" data-yp-skin="{{.Skin}}" data-sig="{{.Sig}}" data-state="{{.Path}}/state" data-home="{{.Home}}" data-poll="{{.PollMS}}">
-<header class="yp-head"><a class="yp-back" href="{{.Home}}" aria-label="Zurück zu deiner Crew">←</a>{{.PeerFigure}}<div><h1>{{.Title}}</h1><p>{{.Subtitle}}</p></div></header>
+<header class="yp-head"><a class="yp-back" href="{{.Home}}" aria-label="{{.HomeLabel}}">←</a>{{.PeerFigure}}<div><h1>{{.Title}}</h1><p>{{.Subtitle}}</p></div></header>
 <div class="yp-wrap">
 {{if .Alert}}<p class="yp-alert" role="alert">{{.Alert}}</p>{{end}}
 <div class="yp-pad" aria-live="polite"><p class="yp-status" id="yp-status">{{.Status}}</p><p class="yp-detail" id="yp-detail">{{.Detail}}</p></div>
