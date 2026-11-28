@@ -15,7 +15,9 @@ package games
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -31,6 +33,7 @@ import (
 	"github.com/pblumer/yapuno/internal/chess"
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/devicepairing"
+	"github.com/pblumer/yapuno/internal/familydashboard"
 	"github.com/pblumer/yapuno/internal/play"
 )
 
@@ -176,6 +179,51 @@ type Principal struct {
 	DeviceID string
 }
 
+// GuardianPrincipal is a guardian, taken from a verified guardian session.
+type GuardianPrincipal struct {
+	TenantID, GuardianID string
+}
+
+// actor is whoever acts: a child on a device, or a guardian.
+type actor struct {
+	who    authz.Participant
+	device string
+}
+
+func childParticipant(tenantID, childID string) authz.Participant {
+	return authz.Participant{TenantID: tenantID, ID: childID, Kind: authz.ParticipantChild}
+}
+
+func guardianParticipant(tenantID, guardianID string) authz.Participant {
+	return authz.Participant{TenantID: tenantID, ID: guardianID, Kind: authz.ParticipantAdult}
+}
+
+func childActor(p Principal) actor {
+	return actor{who: childParticipant(p.Party.TenantID, p.Party.ChildID), device: p.DeviceID}
+}
+
+func guardianActor(g GuardianPrincipal) actor {
+	return actor{who: guardianParticipant(g.TenantID, g.GuardianID)}
+}
+
+// FamilyScope is the stable identifier of the games of a guardian with
+// their own child. It is derived, not secret: knowing it grants nothing.
+func FamilyScope(tenantID, guardianID, childID string) string {
+	sum := sha256.Sum256([]byte("yapuno family chess\x00" + tenantID + "\x00" + guardianID + "\x00" + childID))
+	return hex.EncodeToString(sum[:16])
+}
+
+// Families is the authoritative source for guardian grants.
+type Families interface {
+	Cards(guardianID, tenantID string) []familydashboard.ChildCard
+	GuardiansOf(tenantID, childID string) []string
+}
+
+// Guardians says whether a guardian identity is active and not locked.
+type Guardians interface {
+	ActiveGuardian(ctx context.Context, guardianID, tenantID string) bool
+}
+
 // Contacts exposes stored consent records.
 type Contacts interface {
 	Grant(id string, self contacts.Party) (contacts.Party, authz.ContactGrant, bool)
@@ -199,11 +247,14 @@ type Enablement interface {
 
 // View is one game as seen by one of its two players at one moment.
 type View struct {
-	ID      string
-	Contact string
-	Mode    Mode
-	Phase   Phase
-	End     End
+	ID string
+	// Scope is the contact id of two children, or the FamilyScope of a
+	// guardian and their child. Family says which.
+	Scope  string
+	Family bool
+	Mode   Mode
+	Phase  Phase
+	End    End
 	// Winner is NoColor for a draw or a game without result.
 	Winner     chess.Color
 	YourColor  chess.Color
@@ -239,20 +290,24 @@ func (v View) YourTurnToAnswer() bool { return v.Phase == Invited && !v.YouInvit
 
 // entry is one log line.
 type entry struct {
-	Game     string    `json:"game"`
-	Seq      uint64    `json:"seq"`
-	At       time.Time `json:"at"`
-	Type     string    `json:"type"`
-	TenantID string    `json:"tenant_id"`
-	ChildID  string    `json:"child_id"`
-	ClientID string    `json:"client_id"`
-	// Invitation only.
-	Contact      string `json:"contact,omitempty"`
-	PeerTenantID string `json:"peer_tenant_id,omitempty"`
-	PeerChildID  string `json:"peer_child_id,omitempty"`
-	Mode         Mode   `json:"mode,omitempty"`
-	InviterColor string `json:"inviter_color,omitempty"`
-	Tips         bool   `json:"tips,omitempty"`
+	Game string    `json:"game"`
+	Seq  uint64    `json:"seq"`
+	At   time.Time `json:"at"`
+	Type string    `json:"type"`
+	// The actor is a child (ChildID) or a guardian (GuardianID), never both.
+	TenantID   string `json:"tenant_id"`
+	ChildID    string `json:"child_id,omitempty"`
+	GuardianID string `json:"guardian_id,omitempty"`
+	ClientID   string `json:"client_id"`
+	// Invitation only. Contact is the scope; Family marks a family game.
+	Contact        string `json:"contact,omitempty"`
+	Family         bool   `json:"family,omitempty"`
+	PeerTenantID   string `json:"peer_tenant_id,omitempty"`
+	PeerChildID    string `json:"peer_child_id,omitempty"`
+	PeerGuardianID string `json:"peer_guardian_id,omitempty"`
+	Mode           Mode   `json:"mode,omitempty"`
+	InviterColor   string `json:"inviter_color,omitempty"`
+	Tips           bool   `json:"tips,omitempty"`
 	// Move and hint.
 	Move  string     `json:"move,omitempty"`
 	Ply   int        `json:"ply,omitempty"`
@@ -270,13 +325,35 @@ type storedTip struct {
 
 const typeInvite = "invite"
 
-func (e entry) actor() contacts.Party {
-	return contacts.Party{TenantID: e.TenantID, ChildID: e.ChildID}
+func participant(tenantID, childID, guardianID string) (authz.Participant, bool) {
+	switch {
+	case tenantID == "" || (childID == "") == (guardianID == ""):
+		return authz.Participant{}, false
+	case guardianID != "":
+		return guardianParticipant(tenantID, guardianID), true
+	}
+	return childParticipant(tenantID, childID), true
+}
+
+func (e entry) actor() authz.Participant {
+	p, _ := participant(e.TenantID, e.ChildID, e.GuardianID)
+	return p
+}
+
+// setActor fills the actor fields of an entry.
+func (e *entry) setActor(p authz.Participant) {
+	e.TenantID = p.TenantID
+	if p.Kind == authz.ParticipantAdult {
+		e.GuardianID = p.ID
+	} else {
+		e.ChildID = p.ID
+	}
 }
 
 type game struct {
-	id, contact      string
-	inviter, invitee contacts.Party
+	id, scope        string
+	family           bool
+	inviter, invitee authz.Participant
 	inviterColor     chess.Color
 	mode             Mode
 	created          time.Time
@@ -297,7 +374,7 @@ type game struct {
 	tipAt            [3]map[int]*Tip // by colour, then half-move
 }
 
-func (g *game) colorOf(p contacts.Party) chess.Color {
+func (g *game) colorOf(p authz.Participant) chess.Color {
 	switch p {
 	case g.inviter:
 		return g.inviterColor
@@ -347,7 +424,7 @@ func (g *game) flag() (time.Time, bool) {
 
 type idempotencyKey struct {
 	scope    string // game id, or "invite:" + contact id
-	actor    contacts.Party
+	actor    authz.Participant
 	clientID string
 }
 
@@ -366,6 +443,9 @@ type Store struct {
 	children Children
 	enabled  Enablement
 	now      func() time.Time
+	// families and guardians are set by EnableFamilies.
+	families  Families
+	guardians Guardians
 
 	file  *os.File
 	size  int64
@@ -463,7 +543,7 @@ func (s *Store) load(line []byte) error {
 	if err := dec.Decode(&e); err != nil {
 		return fmt.Errorf("%w: corrupt log line", ErrInvalid)
 	}
-	if !gameIDPattern.MatchString(e.Game) || e.At.IsZero() || !clientIDPattern.MatchString(e.ClientID) {
+	if _, ok := participant(e.TenantID, e.ChildID, e.GuardianID); !ok || !gameIDPattern.MatchString(e.Game) || e.At.IsZero() || !clientIDPattern.MatchString(e.ClientID) {
 		return fmt.Errorf("%w: log line", ErrInvalid)
 	}
 	g := s.games[e.Game]
@@ -503,15 +583,27 @@ func colorName(c chess.Color) string {
 }
 
 func newGame(e entry) (*game, error) {
-	inviter := e.actor()
-	invitee := contacts.Party{TenantID: e.PeerTenantID, ChildID: e.PeerChildID}
+	inviter, ok1 := participant(e.TenantID, e.ChildID, e.GuardianID)
+	invitee, ok2 := participant(e.PeerTenantID, e.PeerChildID, e.PeerGuardianID)
 	color := map[string]chess.Color{"white": chess.White, "black": chess.Black}[e.InviterColor]
-	if e.Contact == "" || len(e.Contact) > 128 || inviter.TenantID == "" || inviter.ChildID == "" ||
-		invitee.TenantID == "" || invitee.ChildID == "" || inviter == invitee || !e.Mode.valid() ||
+	if !ok1 || !ok2 || e.Contact == "" || len(e.Contact) > 128 || inviter == invitee || !e.Mode.valid() ||
 		color == chess.NoColor || e.Move != "" || e.Ply != 0 || e.Level != 0 || e.Tip != nil {
 		return nil, fmt.Errorf("%w: invitation", ErrInvalid)
 	}
-	g := &game{id: e.Game, contact: e.Contact, inviter: inviter, invitee: invitee, inviterColor: color,
+	// Two children of a contact, or a guardian with their own child.
+	if e.Family {
+		adult, child := inviter, invitee
+		if adult.Kind != authz.ParticipantAdult {
+			adult, child = invitee, inviter
+		}
+		if adult.Kind != authz.ParticipantAdult || child.Kind != authz.ParticipantChild || adult.TenantID != child.TenantID ||
+			e.Contact != FamilyScope(adult.TenantID, adult.ID, child.ID) {
+			return nil, fmt.Errorf("%w: family invitation", ErrInvalid)
+		}
+	} else if inviter.Kind != authz.ParticipantChild || invitee.Kind != authz.ParticipantChild {
+		return nil, fmt.Errorf("%w: invitation", ErrInvalid)
+	}
+	g := &game{id: e.Game, scope: e.Contact, family: e.Family, inviter: inviter, invitee: invitee, inviterColor: color,
 		mode: e.Mode, created: e.At, phase: Invited, rules: chess.NewGame(), last: e.At, seq: 1,
 		entries: []entry{e}, tips: e.Tips}
 	g.tipAt[chess.White], g.tipAt[chess.Black] = map[int]*Tip{}, map[int]*Tip{}
@@ -528,13 +620,13 @@ func (s *Store) remember(g *game, e entry) {
 	scope := g.id
 	fp := fingerprint(Action{Kind: ActionKind(e.Type), Move: e.Move, Ply: e.Ply, Level: e.Level})
 	if e.Type == typeInvite {
-		scope, fp = "invite:"+g.contact, inviteFingerprint(e.Mode, e.Tips)
+		scope, fp = "invite:"+g.scope, inviteFingerprint(e.Mode, e.Tips)
 	}
 	s.keys[idempotencyKey{scope, e.actor(), e.ClientID}] = keyed{game: g.id, fingerprint: fp}
 }
 
 // check decides whether actor may perform a at now. It changes nothing.
-func (g *game) check(actor contacts.Party, a Action, now time.Time) error {
+func (g *game) check(actor authz.Participant, a Action, now time.Time) error {
 	color := g.colorOf(actor)
 	if color == chess.NoColor || !knownActions[a.Kind] {
 		return ErrInvalid
@@ -695,45 +787,128 @@ func (g *game) apply(e entry) {
 	g.entries = append(g.entries, e)
 }
 
-// authorize loads the current state behind one attempt and applies
-// authz.CanPlayGame. It runs at the moment of every call.
-func (s *Store) authorize(p Principal, contactID string) (contacts.Party, bool) {
-	if contactID == "" || p.DeviceID == "" || p.Party.TenantID == "" || p.Party.ChildID == "" {
-		return contacts.Party{}, false
+// allowedScope loads the current state behind one attempt for a scope and
+// returns the other player, whether it is a family game, and whether the
+// actor may play there right now. It runs at the moment of every call.
+func (s *Store) allowedScope(a actor, scope string) (authz.Participant, bool, bool) {
+	w := a.who
+	if scope == "" || w.TenantID == "" || w.ID == "" {
+		return authz.Participant{}, false, false
 	}
-	peer, grant, ok := s.contacts.Grant(contactID, p.Party)
-	if !ok {
-		return contacts.Party{}, false
+	switch w.Kind {
+	case authz.ParticipantChild:
+		if a.device == "" {
+			return authz.Participant{}, false, false
+		}
+		self := contacts.Party{TenantID: w.TenantID, ChildID: w.ID}
+		if peer, grant, ok := s.contacts.Grant(scope, self); ok {
+			_, device := s.devices.ActiveDevice(w.TenantID, w.ID, a.device)
+			_, mine := s.children.ChildName(w.TenantID, w.ID)
+			_, other := s.children.ChildName(peer.TenantID, peer.ChildID)
+			allowed := authz.CanPlayGame(authz.GameAccess{
+				Conversation: authz.ConversationAccess{
+					Self: w, Peer: peer.Participant(),
+					SelfEnabled: mine, PeerEnabled: other, DeviceApproved: device, Contact: grant,
+				},
+				SelfGameEnabled: s.enabled.Enabled(w.TenantID, w.ID, play.GameChess),
+				PeerGameEnabled: s.enabled.Enabled(peer.TenantID, peer.ChildID, play.GameChess),
+			})
+			return peer.Participant(), false, allowed
+		}
+		if s.families == nil {
+			return authz.Participant{}, false, false
+		}
+		for _, g := range s.families.GuardiansOf(w.TenantID, w.ID) {
+			if FamilyScope(w.TenantID, g, w.ID) == scope {
+				guardian := guardianParticipant(w.TenantID, g)
+				return guardian, true, s.familyAllowed(a, guardian, w)
+			}
+		}
+	case authz.ParticipantAdult:
+		if s.families == nil {
+			return authz.Participant{}, false, false
+		}
+		for _, c := range s.families.Cards(w.ID, w.TenantID) {
+			if FamilyScope(w.TenantID, w.ID, c.ID) == scope {
+				child := childParticipant(w.TenantID, c.ID)
+				return child, true, s.familyAllowed(a, w, child)
+			}
+		}
 	}
-	_, device := s.devices.ActiveDevice(p.Party.TenantID, p.Party.ChildID, p.DeviceID)
-	_, self := s.children.ChildName(p.Party.TenantID, p.Party.ChildID)
-	_, other := s.children.ChildName(peer.TenantID, peer.ChildID)
-	allowed := authz.CanPlayGame(authz.GameAccess{
-		Conversation: authz.ConversationAccess{
-			Self: p.Party.Participant(), Peer: peer.Participant(),
-			SelfEnabled: self, PeerEnabled: other, DeviceApproved: device, Contact: grant,
-		},
-		SelfGameEnabled: s.enabled.Enabled(p.Party.TenantID, p.Party.ChildID, play.GameChess),
-		PeerGameEnabled: s.enabled.Enabled(peer.TenantID, peer.ChildID, play.GameChess),
-	})
-	return peer, allowed
+	return authz.Participant{}, false, false
 }
 
-// authorizedGame returns a game of which p is a player, if p may play it now.
-func (s *Store) authorizedGame(p Principal, gameID string) (*game, bool) {
+// familyAllowed applies authz.CanPlayFamilyGame from current state.
+func (s *Store) familyAllowed(a actor, guardian, child authz.Participant) bool {
+	var grant authz.GuardianGrant
+	for _, c := range s.families.Cards(guardian.ID, guardian.TenantID) {
+		if c.ID == child.ID {
+			grant = authz.GuardianGrant{GuardianID: guardian.ID, ChildID: child.ID, TenantID: child.TenantID, Active: true,
+				CanManageDevices: c.Permissions.ManageDevices, CanApproveContacts: c.Permissions.ApproveContacts}
+		}
+	}
+	_, enabled := s.children.ChildName(child.TenantID, child.ID)
+	approved := false
+	if a.who == child && a.device != "" {
+		_, approved = s.devices.ActiveDevice(child.TenantID, child.ID, a.device)
+	}
+	return authz.CanPlayFamilyGame(authz.FamilyGameAccess{
+		Chat: authz.FamilyChatAccess{Self: a.who, Guardian: guardian, Child: child, Grant: grant,
+			GuardianActive: s.guardians.ActiveGuardian(context.Background(), guardian.ID, guardian.TenantID),
+			ChildEnabled:   enabled, DeviceApproved: approved},
+		ChildGameEnabled: s.enabled.Enabled(child.TenantID, child.ID, play.GameChess),
+	})
+}
+
+// authorizedGame returns a game of which the actor is a player, if the
+// actor may play it now.
+func (s *Store) authorizedGame(a actor, gameID string) (*game, bool) {
 	g, ok := s.games[gameID]
 	if !ok {
 		return nil, false
 	}
-	peer, ok := s.authorize(p, g.contact)
-	if !ok || !((p.Party == g.inviter && peer == g.invitee) || (p.Party == g.invitee && peer == g.inviter)) {
+	peer, family, ok := s.allowedScope(a, g.scope)
+	if !ok || family != g.family || !((a.who == g.inviter && peer == g.invitee) || (a.who == g.invitee && peer == g.inviter)) {
 		return nil, false
 	}
 	return g, true
 }
 
-func (s *Store) view(g *game, self contacts.Party, now time.Time) View {
-	v := View{ID: g.id, Contact: g.contact, Mode: g.mode, Phase: g.phase, YourColor: g.colorOf(self),
+// exists says whether the relationship behind a game still exists, which
+// decides what compaction keeps.
+func (s *Store) exists(g *game) bool {
+	if !g.family {
+		return s.contacts.Exists(g.scope)
+	}
+	if s.families == nil {
+		return true
+	}
+	adult, child := g.inviter, g.invitee
+	if adult.Kind != authz.ParticipantAdult {
+		adult, child = child, adult
+	}
+	for _, id := range s.families.GuardiansOf(child.TenantID, child.ID) {
+		if id == adult.ID {
+			return true
+		}
+	}
+	return false
+}
+
+// EnableFamilies switches on games between guardians and their own
+// children. Without it, no family game is authorized.
+func (s *Store) EnableFamilies(f Families, g Guardians) error {
+	if f == nil || g == nil {
+		return ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.families, s.guardians = f, g
+	return s.compact()
+}
+
+func (s *Store) view(g *game, self authz.Participant, now time.Time) View {
+	v := View{ID: g.id, Scope: g.scope, Family: g.family, Mode: g.mode, Phase: g.phase, YourColor: g.colorOf(self),
 		YouInvited: self == g.inviter, Position: g.rules.Position(), Moves: g.rules.Moves(), Version: g.seq,
 		At: now, DrawOffer: g.offer, White: g.left[chess.White], Black: g.left[chess.Black]}
 	end, winner, at := g.settle(now)
@@ -796,13 +971,22 @@ func newGameID() (string, error) {
 
 func inviteFingerprint(mode Mode, tips bool) string { return fmt.Sprintf("%s %t", mode, tips) }
 
-// Invite starts a game with the other child of a contact. The inviter's
-// colour is chosen by the server; tips says whether both players may take
-// tips.
-func (s *Store) Invite(p Principal, contactID, clientID string, mode Mode, tips bool) (View, error) {
+// Invite starts a game in a scope: with the other child of a contact, or
+// with one of the child's own guardians (FamilyScope). The inviter's colour
+// is chosen by the server; tips says whether both players may take tips.
+func (s *Store) Invite(p Principal, scope, clientID string, mode Mode, tips bool) (View, error) {
+	return s.invite(childActor(p), scope, clientID, mode, tips)
+}
+
+// GuardianInvite starts a game of a guardian with their own child.
+func (s *Store) GuardianInvite(g GuardianPrincipal, childID, clientID string, mode Mode, tips bool) (View, error) {
+	return s.invite(guardianActor(g), FamilyScope(g.TenantID, g.GuardianID, childID), clientID, mode, tips)
+}
+
+func (s *Store) invite(p actor, contactID, clientID string, mode Mode, tips bool) (View, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	peer, ok := s.authorize(p, contactID)
+	peer, family, ok := s.allowedScope(p, contactID)
 	if !ok {
 		return View{}, ErrForbidden
 	}
@@ -810,21 +994,21 @@ func (s *Store) Invite(p Principal, contactID, clientID string, mode Mode, tips 
 		return View{}, ErrInvalid
 	}
 	now := s.now().UTC()
-	if k, seen := s.keys[idempotencyKey{"invite:" + contactID, p.Party, clientID}]; seen {
+	if k, seen := s.keys[idempotencyKey{"invite:" + contactID, p.who, clientID}]; seen {
 		if k.fingerprint != inviteFingerprint(mode, tips) {
 			return View{}, ErrConflict
 		}
-		return s.view(s.games[k.game], p.Party, now), nil
+		return s.view(s.games[k.game], p.who, now), nil
 	}
 	recent := 0
 	for _, g := range s.games {
-		if g.contact != contactID {
+		if g.scope != contactID {
 			continue
 		}
 		if end, _, _ := g.settle(now); end == "" {
 			return View{}, ErrBusy
 		}
-		if g.inviter == p.Party && g.created.After(now.Add(-24*time.Hour)) {
+		if g.inviter == p.who && g.created.After(now.Add(-24*time.Hour)) {
 			recent++
 		}
 	}
@@ -843,9 +1027,14 @@ func (s *Store) Invite(p Principal, contactID, clientID string, mode Mode, tips 
 	if white {
 		color = chess.White
 	}
-	e := entry{Game: id, Seq: 1, At: now, Type: typeInvite, TenantID: p.Party.TenantID, ChildID: p.Party.ChildID,
-		ClientID: clientID, Contact: contactID, PeerTenantID: peer.TenantID, PeerChildID: peer.ChildID,
-		Mode: mode, InviterColor: colorName(color), Tips: tips}
+	e := entry{Game: id, Seq: 1, At: now, Type: typeInvite, ClientID: clientID, Contact: contactID, Family: family,
+		PeerTenantID: peer.TenantID, Mode: mode, InviterColor: colorName(color), Tips: tips}
+	e.setActor(p.who)
+	if peer.Kind == authz.ParticipantAdult {
+		e.PeerGuardianID = peer.ID
+	} else {
+		e.PeerChildID = peer.ID
+	}
 	g, err := newGame(e)
 	if err != nil {
 		return View{}, err
@@ -855,12 +1044,21 @@ func (s *Store) Invite(p Principal, contactID, clientID string, mode Mode, tips 
 	}
 	s.games[id] = g
 	s.remember(g, e)
-	return s.view(g, p.Party, now), nil
+	return s.view(g, p.who, now), nil
 }
 
 // Act performs one action. The second result is true when this client id
 // was already stored for the same action; nothing is written then.
 func (s *Store) Act(p Principal, gameID string, a Action) (View, bool, error) {
+	return s.act(childActor(p), gameID, a)
+}
+
+// GuardianAct is Act for a guardian in a game with their own child.
+func (s *Store) GuardianAct(g GuardianPrincipal, gameID string, a Action) (View, bool, error) {
+	return s.act(guardianActor(g), gameID, a)
+}
+
+func (s *Store) act(p actor, gameID string, a Action) (View, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	g, ok := s.authorizedGame(p, gameID)
@@ -871,18 +1069,18 @@ func (s *Store) Act(p Principal, gameID string, a Action) (View, bool, error) {
 		return View{}, false, ErrInvalid
 	}
 	now := s.now().UTC()
-	if k, seen := s.keys[idempotencyKey{gameID, p.Party, a.ClientID}]; seen {
+	if k, seen := s.keys[idempotencyKey{gameID, p.who, a.ClientID}]; seen {
 		if k.fingerprint != fingerprint(a) {
 			return View{}, false, ErrConflict
 		}
-		return s.view(g, p.Party, now), true, nil
+		return s.view(g, p.who, now), true, nil
 	}
 	at := stamp(now, g.last)
-	if err := g.check(p.Party, a, at); err != nil {
+	if err := g.check(p.who, a, at); err != nil {
 		return View{}, false, err
 	}
-	e := entry{Game: gameID, Seq: g.seq + 1, At: at, Type: string(a.Kind), TenantID: p.Party.TenantID,
-		ChildID: p.Party.ChildID, ClientID: a.ClientID, Move: a.Move, Ply: a.Ply, Level: a.Level}
+	e := entry{Game: gameID, Seq: g.seq + 1, At: at, Type: string(a.Kind), ClientID: a.ClientID, Move: a.Move, Ply: a.Ply, Level: a.Level}
+	e.setActor(p.who)
 	if a.Kind == Hint {
 		e.Tip = computeTip(g.rules.Position(), a.Level)
 	}
@@ -891,33 +1089,49 @@ func (s *Store) Act(p Principal, gameID string, a Action) (View, bool, error) {
 	}
 	g.apply(e)
 	s.remember(g, e)
-	return s.view(g, p.Party, now), false, nil
+	return s.view(g, p.who, now), false, nil
 }
 
 // Game returns one game for one of its players.
-func (s *Store) Game(p Principal, gameID string) (View, error) {
+func (s *Store) Game(p Principal, gameID string) (View, error) { return s.game(childActor(p), gameID) }
+
+// GuardianGame is Game for a guardian.
+func (s *Store) GuardianGame(g GuardianPrincipal, gameID string) (View, error) {
+	return s.game(guardianActor(g), gameID)
+}
+
+func (s *Store) game(p actor, gameID string) (View, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	g, ok := s.authorizedGame(p, gameID)
 	if !ok {
 		return View{}, ErrForbidden
 	}
-	return s.view(g, p.Party, s.now().UTC()), nil
+	return s.view(g, p.who, s.now().UTC()), nil
 }
 
-// Latest returns the unfinished game of a contact, or else its most recent
-// one. The second result is false when the contact has no stored game.
-func (s *Store) Latest(p Principal, contactID string) (View, bool, error) {
+// Latest returns the unfinished game of a scope, or else its most recent
+// one. The second result is false when the scope has no stored game.
+func (s *Store) Latest(p Principal, scope string) (View, bool, error) {
+	return s.latest(childActor(p), scope)
+}
+
+// GuardianLatest is Latest for a guardian and one of their children.
+func (s *Store) GuardianLatest(g GuardianPrincipal, childID string) (View, bool, error) {
+	return s.latest(guardianActor(g), FamilyScope(g.TenantID, g.GuardianID, childID))
+}
+
+func (s *Store) latest(p actor, contactID string) (View, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.authorize(p, contactID); !ok {
+	if _, _, ok := s.allowedScope(p, contactID); !ok {
 		return View{}, false, ErrForbidden
 	}
 	now := s.now().UTC()
 	var best *game
 	bestOpen := false
 	for _, g := range s.games {
-		if g.contact != contactID {
+		if g.scope != contactID {
 			continue
 		}
 		end, _, _ := g.settle(now)
@@ -930,7 +1144,7 @@ func (s *Store) Latest(p Principal, contactID string) (View, bool, error) {
 	if best == nil {
 		return View{}, false, nil
 	}
-	return s.view(best, p.Party, now), true, nil
+	return s.view(best, p.who, now), true, nil
 }
 
 // append writes one line and syncs it. On any failure the log is cut back to
@@ -986,7 +1200,7 @@ func (s *Store) compact() error {
 	var out bytes.Buffer
 	for _, id := range ids {
 		g := s.games[id]
-		if !s.contacts.Exists(g.contact) {
+		if !s.exists(g) {
 			continue
 		}
 		if end, _, at := g.settle(now); end != "" && !now.Before(at.Add(Retention)) {

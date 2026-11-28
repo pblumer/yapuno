@@ -1,6 +1,7 @@
 package games
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -191,7 +192,7 @@ func TestInviteAcceptAndPlayToCheckmate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Phase != Invited || !v.YouInvited || v.YourColor != chess.White || v.Contact != w.contact || len(v.ID) != 32 {
+	if v.Phase != Invited || !v.YouInvited || v.YourColor != chess.White || v.Scope != w.contact || len(v.ID) != 32 {
 		t.Fatalf("invitation view: %+v", v)
 	}
 	seen, err := w.store.Game(w.mia, v.ID)
@@ -861,5 +862,134 @@ func TestInvitationRetryMustMatchTips(t *testing.T) {
 	}
 	if v, err := w.store.Invite(w.lea, w.contact, id, Correspondence, true); err != nil || !v.Tips {
 		t.Fatalf("retry: %+v %v", v, err)
+	}
+}
+
+type guardianDirectory struct{ locked map[string]bool }
+
+func (d guardianDirectory) ActiveGuardian(_ context.Context, guardianID, tenantID string) bool {
+	return !d.locked[tenantID+"/"+guardianID]
+}
+
+func TestFamilyGames(t *testing.T) {
+	w := newWorld(t)
+	anna := GuardianPrincipal{TenantID: "family-a", GuardianID: "anna"}
+	bruno := GuardianPrincipal{TenantID: "family-b", GuardianID: "bruno"}
+	if _, err := w.store.GuardianInvite(anna, "lea", w.id(), Correspondence, false); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("family games before they are enabled: %v", err)
+	}
+	dir := guardianDirectory{locked: map[string]bool{}}
+	if err := w.store.EnableFamilies(w.families, dir); err != nil {
+		t.Fatal(err)
+	}
+	scope := FamilyScope("family-a", "anna", "lea")
+	v, err := w.store.GuardianInvite(anna, "lea", w.id(), Live10, true)
+	if err != nil || !v.Family || v.Scope != scope || v.YourColor != chess.White || !v.YouInvited {
+		t.Fatalf("guardian invites: %+v %v", v, err)
+	}
+	game := v.ID
+	seen, ok, err := w.store.Latest(w.lea, scope)
+	if err != nil || !ok || !seen.YourTurnToAnswer() || seen.YourColor != chess.Black {
+		t.Fatalf("child sees invitation: %+v %v %v", seen, ok, err)
+	}
+	if _, _, err := w.store.Act(w.lea, game, Action{Kind: Accept, ClientID: w.id()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := w.store.GuardianAct(anna, game, Action{Kind: Move, ClientID: w.id(), Move: "e2e4"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := w.store.Act(w.lea, game, Action{Kind: Move, ClientID: w.id(), Move: "e7e5", Ply: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := w.store.GuardianGame(anna, game); err != nil || len(v.Moves) != 2 || !v.YourTurn() {
+		t.Fatalf("guardian view: %+v %v", v, err)
+	}
+	// Nobody else reaches the game.
+	if _, err := w.store.GuardianGame(bruno, game); !errors.Is(err, ErrForbidden) {
+		t.Errorf("other family's guardian: %v", err)
+	}
+	if _, err := w.store.GuardianInvite(bruno, "lea", w.id(), Correspondence, false); !errors.Is(err, ErrForbidden) {
+		t.Errorf("other family's guardian invites: %v", err)
+	}
+	if _, _, err := w.store.GuardianLatest(bruno, "lea"); !errors.Is(err, ErrForbidden) {
+		t.Errorf("other family's guardian latest: %v", err)
+	}
+	for name, p := range map[string]Principal{"Mia": w.mia, "sibling Tim": w.tim, "Noah with the same child id": w.noah} {
+		if _, err := w.store.Game(p, game); !errors.Is(err, ErrForbidden) {
+			t.Errorf("%s reads: %v", name, err)
+		}
+		if _, _, err := w.store.Latest(p, scope); !errors.Is(err, ErrForbidden) {
+			t.Errorf("%s latest: %v", name, err)
+		}
+	}
+	// One unfinished game per pair; restart keeps the game.
+	if _, err := w.store.Invite(w.lea, scope, w.id(), Correspondence, false); !errors.Is(err, ErrBusy) {
+		t.Errorf("second game: %v", err)
+	}
+	w.reopen(t)
+	if _, err := w.store.GuardianGame(anna, game); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("family game readable before EnableFamilies after restart: %v", err)
+	}
+	w.store.EnableFamilies(w.families, dir)
+	if v, err := w.store.Game(w.lea, game); err != nil || len(v.Moves) != 2 || !v.Family {
+		t.Fatalf("after restart: %+v %v", v, err)
+	}
+	// A locked guardian, a revoked device or chess switched off stop it.
+	dir.locked["family-a/anna"] = true
+	if _, err := w.store.GuardianGame(anna, game); !errors.Is(err, ErrForbidden) {
+		t.Errorf("locked guardian: %v", err)
+	}
+	if _, err := w.store.Game(w.lea, game); !errors.Is(err, ErrForbidden) {
+		t.Errorf("child with locked guardian: %v", err)
+	}
+	delete(dir.locked, "family-a/anna")
+	w.enable(t, leaParty, false)
+	if _, err := w.store.GuardianGame(anna, game); !errors.Is(err, ErrForbidden) {
+		t.Errorf("chess off: %v", err)
+	}
+	w.enable(t, leaParty, true)
+	if err := w.pairing.Revoke("anna", "family-a", "lea", w.lea.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.store.Game(w.lea, game); !errors.Is(err, ErrForbidden) {
+		t.Errorf("revoked device: %v", err)
+	}
+	if _, err := w.store.GuardianGame(anna, game); err != nil {
+		t.Errorf("the guardian does not need the child's device: %v", err)
+	}
+	// The child's profile goes: the game is deleted at compaction.
+	if err := w.families.RemoveChild("anna", "family-a", "lea"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.Compact(); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(w.path); strings.Contains(string(data), game) {
+		t.Fatal("family game of a removed child kept")
+	}
+}
+
+func TestFamilyInvitationOnDiskIsChecked(t *testing.T) {
+	w := newWorld(t)
+	w.store.EnableFamilies(w.families, guardianDirectory{})
+	v, err := w.store.GuardianInvite(GuardianPrincipal{TenantID: "family-a", GuardianID: "anna"}, "lea", w.id(), Correspondence, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.store.Close()
+	good, _ := os.ReadFile(w.path)
+	for name, content := range map[string]string{
+		"scope of another pair": strings.Replace(string(good), v.Scope, FamilyScope("family-a", "anna", "tim"), 1),
+		"two children":          strings.Replace(string(good), `"guardian_id":"anna"`, `"child_id":"tim"`, 1),
+		"actor both":            strings.Replace(string(good), `"guardian_id":"anna"`, `"guardian_id":"anna","child_id":"tim"`, 1),
+		"not marked family":     strings.Replace(string(good), `"family":true,`, ``, 1),
+	} {
+		if content == string(good) {
+			t.Fatalf("%s: no change", name)
+		}
+		os.WriteFile(w.path, []byte(content), 0600)
+		if _, err := Open(w.path, w.contacts, w.pairing, w.families, w.settings, w.clock.now); err == nil {
+			t.Errorf("%s: opened", name)
+		}
 	}
 }

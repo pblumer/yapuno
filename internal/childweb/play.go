@@ -284,7 +284,7 @@ func (h *handler) playAct(w http.ResponseWriter, r *http.Request) {
 	// anything is done, since the store authorizes by game only.
 	p := gamePrincipal(s)
 	current, err := h.opt.Games.Game(p, gameID)
-	if err != nil || current.Contact != id {
+	if err != nil || current.Scope != id {
 		http.Error(w, "Not allowed", http.StatusForbidden)
 		return
 	}
