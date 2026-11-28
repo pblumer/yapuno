@@ -12,6 +12,8 @@ export YAPUNO_GAMES_FILE=private/games.log
 go run ./cmd/yapuno-web
 ```
 
+Practice against the computer additionally needs `export YAPUNO_PRACTICE_FILE=private/practice.json`, which requires the two chess files.
+
 The play and games files are needed together and require pairing and contacts; the server refuses to start otherwise. Both files are created with mode `0600`. Without them, no chess route or link exists and the family overview lists "Schach" as inactive.
 
 ## Flow
@@ -21,6 +23,13 @@ The play and games files are needed together and require pairing and contacts; t
 3. The child chooses a mode (correspondence, or live with 5, 10 or 20 minutes plus an increment) and invites. The server chooses colours at random.
 4. The other child accepts or declines. Moves are made by tapping a piece and then one of the highlighted target squares, or by typing a move such as `e2e4`. A pawn reaching the last rank asks for the piece.
 5. Draw offers, resigning (behind a confirmation) and aborting before both first moves are available. The page reloads when the other child acts; in a live game it checks every second while the opponent is to move.
+
+## Tips and practice
+
+- **Tips in a game between children** are chosen at the invitation ("Mit Tipps") and visible to both before accepting. Each child may take **three tips per game**. A tip first explains the position (mate in one possible, own king in check, a threatened mate, an own piece in danger, a piece to win, develop, castle, or a general prompt); "Zeig mir einen Zug" on the same move then names a move and marks its two squares in green. Only the taker sees the content; the opponent sees "Mia hat 1 genutzt". The tip is computed once and stored with the action.
+- **Practice against the computer** (`/child/practice`): three levels (easy plays at one half-move with deliberate randomness, medium at two, hard at three half-moves plus captures), choice of colour, unlimited tips, taking back the last own move, resigning. No clock and no polling: the computer answers within the same request.
+- **These are heuristics for children, not engine analysis.** Attackers and defenders are counted without exchanges, pins or x-rays, and the search looks only a few half-moves ahead with a simple evaluation. In the headless check, the move tip after 1.e4 e5 2.Nf3 Nc6 was "Läufer f1 nach d3": legal and not losing, but a move a chess teacher would not recommend, because it blocks the d-pawn. The texts therefore say "ein guter Zug", not "der beste Zug". A better evaluation is possible later; it needs tests against positions a trainer has judged.
+- Cost: the hardest search took at most about 60 ms in complex middlegame positions on the development container; the node limit bounds it. A child may make at most 30 practice moves or tip requests per minute.
 
 ## Rules and outcomes
 
@@ -50,7 +59,7 @@ Page rendered at 320 and 390 CSS px: no horizontal overflow; tap on a bishop hig
 ## Limitations
 
 - No playtime quota (#19 leaves the semantics open).
-- No hints or teaching aids, no computer opponent.
+- Tips and the computer opponent are simple heuristics (see above); no ratings or rankings.
 - No notifications; a child sees an invitation or a move only when opening Yapuno.
 - Polling, not realtime; single server process; all games in memory.
 - Games between siblings, with guardians or in groups are not possible.

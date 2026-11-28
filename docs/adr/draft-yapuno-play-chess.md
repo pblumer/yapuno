@@ -1,7 +1,7 @@
 # ADR-DRAFT: Chess between approved contacts, played live or by correspondence
 
 - **Status:** Proposed
-- **Implementation:** First slice on a branch (pending review): rules engine, guardian switch, game store, child chess page and guardian games page as a synthetic browser preview; see [chess preview](../planning/chess-preview.md). No quota, no notifications, no real-device evidence.
+- **Implementation:** First slice on a branch (pending review): rules engine, guardian switch, game store, child chess page and guardian games page as a synthetic browser preview, with tips and practice against the computer; see [chess preview](../planning/chess-preview.md). No quota, no notifications, no real-device evidence.
 - **Date:** 2026-11-28
 - **Deciders:** maintainers; child-safety, privacy and accessibility review required before real use
 
