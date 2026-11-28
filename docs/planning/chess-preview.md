@@ -39,7 +39,7 @@ The play and games files are needed together and require pairing and contacts; t
 - **Fail-closed log:** every game is replayed through the rules engine on start; an illegal stored move, a sequence gap, an unknown field or an insecure file prevents start.
 - Ending a contact deletes its games from disk; deleting a child profile deletes its game settings.
 - Guardians have no route into a game; their session gets `401`.
-- Mutation checks: 29 store mutations, 6 web-handler mutations, 4 guardian-page mutations and 10 rules-engine mutations are each detected by the tests.
+- Mutation checks: 28 store mutations, 6 web-handler mutations, 4 guardian-page mutations and 10 rules-engine mutations are each detected by the tests.
 
 ## Browser evidence (headless Chromium, not a physical device)
 
