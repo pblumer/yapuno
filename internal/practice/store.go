@@ -24,6 +24,7 @@ import (
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/games"
 	"github.com/pblumer/yapuno/internal/play"
+	"github.com/pblumer/yapuno/internal/rating"
 )
 
 // Principal is a child on one device, taken from a verified child session.
@@ -78,6 +79,48 @@ type View struct {
 	games.View
 	Level       Level
 	CanTakeback bool
+	Assisted    bool
+}
+
+// Rater rates finished games. Record must be idempotent by game key.
+type Rater interface {
+	Record(gameKey string, a, b rating.Player, scoreA float64) error
+}
+
+// SetRater switches on ratings of unassisted practice games.
+func (s *Store) SetRater(r Rater) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rater = r
+}
+
+// rate passes a finished, unassisted game to the rater once.
+func (s *Store) rate(g *game) {
+	if s.rater == nil || g.rated {
+		return
+	}
+	st := g.rules.Status()
+	if !g.rec.Resigned && st.Kind == chess.Ongoing {
+		return
+	}
+	if g.rec.Assisted {
+		g.rated = true
+		return
+	}
+	score := 0.5
+	switch {
+	case g.rec.Resigned:
+		score = 0
+	case st.Winner == g.color():
+		score = 1
+	case st.Winner != chess.NoColor:
+		score = 0
+	}
+	key := "practice:" + g.rec.TenantID + "\x00" + g.rec.ChildID + "\x00" + g.rec.Started.Format(time.RFC3339Nano)
+	child := rating.Player{Kind: rating.Child, TenantID: g.rec.TenantID, ID: g.rec.ChildID}
+	if s.rater.Record(key, child, rating.Computer(string(g.rec.Level)), score) == nil {
+		g.rated = true
+	}
 }
 
 type storedTip struct {
@@ -97,7 +140,9 @@ type record struct {
 	Moves    []string    `json:"moves"`
 	Tips     []storedTip `json:"tips"`
 	Resigned bool        `json:"resigned,omitempty"`
-	Started  time.Time   `json:"started"`
+	// Assisted says a tip or a takeback was used; the game is not rated.
+	Assisted bool      `json:"assisted,omitempty"`
+	Started  time.Time `json:"started"`
 }
 
 type file struct {
@@ -107,6 +152,7 @@ type file struct {
 type game struct {
 	rec   record
 	rules *chess.Game
+	rated bool
 }
 
 func (g *game) color() chess.Color {
@@ -195,6 +241,7 @@ type Store struct {
 	// the file. Both are fields so tests can control them.
 	rand  func(n int) int
 	write func(path string, data []byte) error
+	rater Rater
 }
 
 // Open loads the file or prepares a new one. It fails closed on insecure
@@ -294,8 +341,9 @@ func (s *Store) commit(p contacts.Party, next *game) error {
 }
 
 func (s *Store) view(g *game) View {
+	s.rate(g)
 	pos := g.rules.Position()
-	v := View{Level: g.rec.Level}
+	v := View{Level: g.rec.Level, Assisted: g.rec.Assisted}
 	v.Mode, v.Phase, v.YourColor, v.Position, v.Moves = games.Correspondence, games.Running, g.color(), pos, g.rules.Moves()
 	v.Version, v.At, v.Tips, v.TipsLeft = uint64(len(g.rec.Moves)), s.now(), true, -1
 	st := g.rules.Status()
@@ -483,6 +531,7 @@ func (s *Store) Act(p Principal, a games.Action) (View, error) {
 			t.Best = best.String()
 		}
 		next.rec.Tips = append(next.rec.Tips, t)
+		next.rec.Assisted = true
 	case Takeback:
 		if g.rec.Resigned || ownMoves(g) == 0 {
 			return View{}, games.ErrNotNow
@@ -496,6 +545,7 @@ func (s *Store) Act(p Principal, a games.Action) (View, error) {
 			keep--
 		}
 		rec := next.rec
+		rec.Assisted = true
 		rec.Moves = rec.Moves[:keep]
 		var tips []storedTip
 		for _, t := range rec.Tips {

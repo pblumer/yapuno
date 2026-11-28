@@ -20,6 +20,7 @@ import (
 	"github.com/pblumer/yapuno/internal/familydashboard"
 	"github.com/pblumer/yapuno/internal/familystore"
 	"github.com/pblumer/yapuno/internal/play"
+	"github.com/pblumer/yapuno/internal/rating"
 )
 
 type clock struct {
@@ -990,6 +991,54 @@ func TestFamilyInvitationOnDiskIsChecked(t *testing.T) {
 		os.WriteFile(w.path, []byte(content), 0600)
 		if _, err := Open(w.path, w.contacts, w.pairing, w.families, w.settings, w.clock.now); err == nil {
 			t.Errorf("%s: opened", name)
+		}
+	}
+}
+
+type recorder struct{ calls []string }
+
+func (r *recorder) Record(key string, a, b rating.Player, scoreA float64) error {
+	r.calls = append(r.calls, fmt.Sprintf("%s %s/%s %s/%s %.1f", key, a.Kind, a.ID, b.Kind, b.ID, scoreA))
+	return nil
+}
+
+func TestFinishedGamesAreRatedOnce(t *testing.T) {
+	w := newWorld(t)
+	r := &recorder{}
+	w.store.SetRater(r)
+	resigned := w.start(t, Correspondence)
+	w.store.Act(w.mia, resigned.ID, Action{Kind: Resign, ClientID: w.id()})
+	w.store.Game(w.lea, resigned.ID)
+	w.store.Game(w.mia, resigned.ID)
+	if len(r.calls) != 1 || r.calls[0] != "game:"+resigned.ID+" child/lea child/mia 1.0" {
+		t.Fatalf("resignation: %q", r.calls)
+	}
+	aborted := w.start(t, Correspondence)
+	w.store.Act(w.lea, aborted.ID, Action{Kind: Abort, ClientID: w.id()})
+	w.store.Game(w.lea, aborted.ID)
+	if len(r.calls) != 1 {
+		t.Fatalf("aborted game rated: %q", r.calls)
+	}
+	// An end that follows from time alone is rated when the game is read.
+	live := w.start(t, Live5)
+	w.move(t, w.lea, live.ID, "e2e4")
+	w.move(t, w.mia, live.ID, "e7e5")
+	w.clock.advance(6 * time.Minute)
+	if len(r.calls) != 1 {
+		t.Fatal("rated before anyone looked")
+	}
+	w.store.Latest(w.mia, w.contact)
+	if len(r.calls) != 2 || r.calls[1] != "game:"+live.ID+" child/lea child/mia 0.0" {
+		t.Fatalf("time-out: %q", r.calls)
+	}
+	// A restart forgets what was rated in memory; the rater is idempotent
+	// by key, and the store asks again with the same key.
+	w.reopen(t)
+	r2 := &recorder{}
+	w.store.SetRater(r2)
+	for _, c := range r2.calls {
+		if !strings.HasPrefix(c, "game:"+resigned.ID) && !strings.HasPrefix(c, "game:"+live.ID) {
+			t.Fatalf("unexpected rating after restart: %q", c)
 		}
 	}
 }

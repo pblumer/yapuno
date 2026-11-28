@@ -35,6 +35,7 @@ import (
 	"github.com/pblumer/yapuno/internal/devicepairing"
 	"github.com/pblumer/yapuno/internal/familydashboard"
 	"github.com/pblumer/yapuno/internal/play"
+	"github.com/pblumer/yapuno/internal/rating"
 )
 
 var (
@@ -370,6 +371,7 @@ type game struct {
 	seq              uint64
 	entries          []entry
 	tips             bool
+	rated            bool // rated, or ended without a rated result
 	tipsUsed         [3]int
 	tipAt            [3]map[int]*Tip // by colour, then half-move
 }
@@ -446,6 +448,7 @@ type Store struct {
 	// families and guardians are set by EnableFamilies.
 	families  Families
 	guardians Guardians
+	rater     Rater
 
 	file  *os.File
 	size  int64
@@ -895,6 +898,59 @@ func (s *Store) exists(g *game) bool {
 	return false
 }
 
+// Rater rates finished games. Record must be idempotent by game key.
+type Rater interface {
+	Record(gameKey string, a, b rating.Player, scoreA float64) error
+}
+
+var ratedEnds = map[End]bool{EndCheckmate: true, EndStalemate: true, EndInsufficient: true, EndRepetition: true,
+	EndFiftyMoves: true, EndResigned: true, EndAgreed: true, EndTimeout: true}
+
+func ratingPlayer(p authz.Participant) rating.Player {
+	kind := rating.Child
+	if p.Kind == authz.ParticipantAdult {
+		kind = rating.Guardian
+	}
+	return rating.Player{Kind: kind, TenantID: p.TenantID, ID: p.ID}
+}
+
+// rate passes a finished game to the rater once. A failure is retried the
+// next time the game is read or compacted.
+func (s *Store) rate(g *game, now time.Time) {
+	if s.rater == nil || g.rated {
+		return
+	}
+	end, winner, _ := g.settle(now)
+	if end == "" {
+		return
+	}
+	if !ratedEnds[end] {
+		g.rated = true
+		return
+	}
+	score := 0.5
+	switch winner {
+	case g.inviterColor:
+		score = 1
+	case g.inviterColor.Other():
+		score = 0
+	}
+	if s.rater.Record("game:"+g.id, ratingPlayer(g.inviter), ratingPlayer(g.invitee), score) == nil {
+		g.rated = true
+	}
+}
+
+// SetRater switches on ratings and rates every game that has ended.
+func (s *Store) SetRater(r Rater) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rater = r
+	now := s.now().UTC()
+	for _, g := range s.games {
+		s.rate(g, now)
+	}
+}
+
 // EnableFamilies switches on games between guardians and their own
 // children. Without it, no family game is authorized.
 func (s *Store) EnableFamilies(f Families, g Guardians) error {
@@ -908,6 +964,7 @@ func (s *Store) EnableFamilies(f Families, g Guardians) error {
 }
 
 func (s *Store) view(g *game, self authz.Participant, now time.Time) View {
+	s.rate(g, now)
 	v := View{ID: g.id, Scope: g.scope, Family: g.family, Mode: g.mode, Phase: g.phase, YourColor: g.colorOf(self),
 		YouInvited: self == g.inviter, Position: g.rules.Position(), Moves: g.rules.Moves(), Version: g.seq,
 		At: now, DrawOffer: g.offer, White: g.left[chess.White], Black: g.left[chess.Black]}
@@ -1200,6 +1257,7 @@ func (s *Store) compact() error {
 	var out bytes.Buffer
 	for _, id := range ids {
 		g := s.games[id]
+		s.rate(g, now)
 		if !s.exists(g) {
 			continue
 		}

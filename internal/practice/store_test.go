@@ -2,6 +2,7 @@ package practice
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/pblumer/yapuno/internal/familystore"
 	"github.com/pblumer/yapuno/internal/games"
 	"github.com/pblumer/yapuno/internal/play"
+	"github.com/pblumer/yapuno/internal/rating"
 )
 
 type world struct {
@@ -278,5 +280,39 @@ func TestOpenFailsClosedAndPurge(t *testing.T) {
 	w.reopen(t)
 	if _, ok, _ := w.store.Current(w.mia); ok {
 		t.Fatal("purge tenant not durable")
+	}
+}
+
+type recorder struct{ calls []string }
+
+func (r *recorder) Record(key string, a, b rating.Player, scoreA float64) error {
+	r.calls = append(r.calls, fmt.Sprintf("%s/%s %s/%s %.1f", a.Kind, a.ID, b.Kind, b.ID, scoreA))
+	return nil
+}
+
+func TestOnlyUnassistedPracticeIsRated(t *testing.T) {
+	w := newWorld(t)
+	r := &recorder{}
+	w.store.SetRater(r)
+	w.store.Start(w.lea, Hard, "white")
+	w.act(w.lea, games.Action{Kind: games.Move, Move: "e2e4", Ply: 0})
+	w.act(w.lea, games.Action{Kind: games.Resign})
+	w.store.Current(w.lea)
+	if len(r.calls) != 1 || r.calls[0] != "child/lea computer/hard 0.0" {
+		t.Fatalf("unassisted: %q", r.calls)
+	}
+	w.store.Start(w.lea, Easy, "white")
+	w.act(w.lea, games.Action{Kind: games.Hint, Level: 1, Ply: 0})
+	w.act(w.lea, games.Action{Kind: games.Resign})
+	w.store.Start(w.lea, Easy, "white")
+	w.act(w.lea, games.Action{Kind: games.Move, Move: "e2e4", Ply: 0})
+	w.act(w.lea, games.Action{Kind: Takeback, Ply: 2})
+	w.act(w.lea, games.Action{Kind: games.Resign})
+	if len(r.calls) != 1 {
+		t.Fatalf("assisted games rated: %q", r.calls)
+	}
+	w.reopen(t)
+	if v, _, _ := w.store.Current(w.lea); !v.Assisted {
+		t.Fatal("assistance not stored")
 	}
 }
