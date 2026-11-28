@@ -83,11 +83,22 @@ Chosen options (if approved): **own rules engine, polling, clock from server tim
 - **Touch target exception:** the MFE spec asks for 44 × 44 CSS px. An 8 × 8 board at a viewport width of 320 CSS px allows at most 40 px per square even edge to edge. The board therefore spans the full width below 352 px, squares meet 44 px from a 352 px viewport, and the two-step tap with visible selection makes a missed tap harmless (nothing is played until a highlighted target is tapped). This exception needs real-device evidence.
 - Pieces are drawn with the chess characters of the system font, always in their solid form and coloured by the skin; this avoids image assets and licence questions. Rendering on real iOS and Android devices must be verified; own SVG pieces are the fallback.
 
+### Tips (help mode)
+- Whether a game between two children has tips is chosen **at the invitation** and shown to both before they accept. Each player may take at most **three tips per game**; both players see how many tips each has used. This keeps a game with tips fair without a guardian decision per game.
+- A tip is requested only by the player to move. **Level 1 explains** the most important thing in the position, in this order: a mate in one is possible; the own king is in check; the opponent threatens mate in one; an own piece is in danger (attacked and undefended, or attacked by a cheaper piece); a piece can be won (an undefended piece, or one worth more than the capturing piece); in the opening, develop knights and bishops or castle; otherwise a general prompt. **Level 2** on the same move names a good move found by a short search. Level 2 counts as part of the same tip.
+- The tip is computed once, when it is requested, and stored with the action, so a reload shows the same tip and costs no new search. Only the player who took a tip sees its content.
+- The analysis is a **heuristic for children, not an engine evaluation**: it counts attackers and defenders without exchanges, x-rays or pins, and the search looks only a few half-moves ahead. A tip can be wrong; the texts say "ein guter Zug", not "der beste Zug".
+
+### Practice against the computer
+- A child may play against a computer opponent at three levels (easy: one half-move with deliberate randomness; medium: two half-moves; hard: three half-moves plus captures), choose white, black or random, take back the last own move and ask for tips without limit. There is no clock.
+- Practice involves no other child, so it needs no contact. It requires an authenticated child session on an approved device and that a guardian has allowed chess for that child; switching chess off stops practice too.
+- One practice game per child is kept in a separate private file, replaced when a new one starts and deleted with the child's profile. A move is acknowledged only after the child's move and the computer's reply are written and synced together.
+- The search is bounded by a node limit, and a child may make at most 30 practice moves or tip requests per minute, so a scripted client cannot keep the server busy.
+
 ### Not decided here
 - **Playtime quota.** The quota policy of issue #19 is not enforced in this slice. A time-based quota does not fit correspondence games that last days; options are a daily number of moves or games, or a quota for live games only. This needs a product decision and its own ADR.
 - Games between a guardian and a child, between siblings, or in groups.
 - Notifications ("you are to move"), push, and a realtime transport.
-- A computer opponent.
 - Other games.
 
 ### Consequences
