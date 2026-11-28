@@ -179,3 +179,16 @@ func TestFormatClockAndSignature(t *testing.T) {
 		t.Error("signature does not change")
 	}
 }
+
+// The page's generic button rule (.yp-play button) must not override the
+// square colours: square rules need at least the same specificity.
+func TestSquareStylesOutrankButtonStyles(t *testing.T) {
+	for _, rule := range []string{".yp-play .yp-sq{", ".yp-play .yp-sq.yp-light{background-color:"} {
+		if !strings.Contains(pageCSS, rule) {
+			t.Errorf("missing %s", rule)
+		}
+	}
+	if strings.Contains(pageCSS, "\n.yp-sq{") {
+		t.Error("square rule weaker than the button rule")
+	}
+}

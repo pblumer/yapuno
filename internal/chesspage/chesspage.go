@@ -440,8 +440,8 @@ const pageCSS = `body{margin:0}
 .yp-clock.yp-running{border-color:var(--yp-accent);box-shadow:inset 0 0 0 2px var(--yp-accent)}
 .yp-clock.yp-low time{color:var(--yp-danger-text)}
 .yp-board{display:grid;grid-template-columns:repeat(8,1fr);width:min(100vw,30rem);aspect-ratio:1/1;margin:.4rem auto;border:2px solid #5b4636;touch-action:manipulation}
-.yp-sq{position:relative;display:grid;place-items:center;min-width:0;min-height:0;aspect-ratio:1/1;margin:0;padding:0;border:0;border-radius:0;background:#b58863;font-size:min(9vw,2.7rem);line-height:1;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.yp-sq.yp-light{background:#f0d9b5}
+.yp-play .yp-sq{position:relative;display:grid;place-items:center;min-width:0;min-height:0;aspect-ratio:1/1;margin:0;padding:0;border:0;border-radius:0;background-color:#b58863;font-size:min(9vw,2.7rem);line-height:1;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.yp-play .yp-sq.yp-light{background-color:#f0d9b5}
 .yp-sq.yp-last{box-shadow:inset 0 0 0 3px rgba(20,85,160,.75)}
 .yp-sq.yp-check{box-shadow:inset 0 0 0 5px #c62828;background-image:radial-gradient(circle,rgba(198,40,40,.55) 0,rgba(198,40,40,0) 70%)}
 .yp-sq.yp-selected{box-shadow:inset 0 0 0 5px #1455a0}
@@ -462,7 +462,6 @@ const pageCSS = `body{margin:0}
 .yp-play button,.yp-play .yp-button{min-height:48px;padding:.6rem 1rem;border:2px solid var(--yp-text-muted);border-radius:var(--yp-radius);background:var(--yp-bg);color:var(--yp-text);font:inherit;font-weight:700;cursor:pointer}
 .yp-play button.yp-primary{border-color:var(--yp-accent);background:var(--yp-accent);color:var(--yp-on-accent)}
 .yp-play button.yp-danger{border-color:var(--yp-danger-text);color:var(--yp-danger-text)}
-.yp-play .yp-sq{min-height:0;padding:0;border:0}
 .yp-play details{margin:.8rem 0;padding:.6rem .8rem;border-radius:var(--yp-radius);background:var(--yp-surface)}
 .yp-play summary{min-height:44px;display:flex;align-items:center;font-weight:700;cursor:pointer}
 .yp-play label{display:block;font-weight:700;margin:.4rem 0}
