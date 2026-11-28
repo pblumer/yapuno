@@ -95,9 +95,21 @@ Chosen options (if approved): **own rules engine, polling, clock from server tim
 - One practice game per child is kept in a separate private file, replaced when a new one starts and deleted with the child's profile. A move is acknowledged only after the child's move and the computer's reply are written and synced together.
 - The search is bounded by a node limit, and a child may make at most 30 practice moves or tip requests per minute, so a scripted client cannot keep the server busy.
 
+### Games between a child and its own guardian
+- A child may play a guardian who currently holds a grant for exactly this child (no management capability needed, as for the family chat), and that guardian may play the child. Either side may invite. Guardians of other families cannot play a child.
+- Authorization uses a new `authz.CanPlayFamilyGame`: everything `authz.CanUseFamilyChat` requires (current grant, guardian identity active and not locked, child profile exists, the child's device approved when the child acts) **and** chess allowed for the child. Removing the grant, locking the guardian, locking the device or switching chess off stops the game on the next request.
+- Family games use the same store, rules, clocks, tips and limits as games between children. A family game is identified by a derived pair id of guardian and child; it carries no other identifiers to the page. The child reaches it next to the guardian under "Deine Eltern", so it needs the guardians' chat, which is where the child sees its guardians; the guardian reaches it from the family overview.
+- Guardians are adults: no quota applies to them, and tips follow the same rule for both sides.
+
+### Private rating
+- Each child has a rating that **only the child sees**, on its own home page. It is not shown to other children, to guardians, or in any list. There is no ranking and no comparison.
+- Elo with K = 40 (the FIDE factor for juniors), starting at 1000, marked "vorläufig" until 10 rated games. Rated are games that ended with a result by the rules, resignation, time-out or agreed draw; declined, withdrawn, expired, aborted and abandoned games are not.
+- Opponents: other children and guardians (whose ratings are kept internally and shown to nobody) and the computer at fixed, **uncalibrated** ratings (easy 600, medium 900, hard 1200). These anchors are assumptions; the number is meaningful for the child's own progress, not as a comparison with any official rating. A practice game counts only if no tip and no takeback was used.
+- Ratings are stored separately from games, because games are deleted 30 days after their end. Each game is rated exactly once (idempotent by game), also for ends that follow from time alone; the rating is applied when the ended game is next read or compacted. Ratings are deleted with the child's profile or the guardian's family.
+
 ### Not decided here
 - **Playtime quota.** The quota policy of issue #19 is not enforced in this slice. A time-based quota does not fit correspondence games that last days; options are a daily number of moves or games, or a quota for live games only. This needs a product decision and its own ADR.
-- Games between a guardian and a child, between siblings, or in groups.
+- Games between siblings, with guardians of other families, or in groups.
 - Notifications ("you are to move"), push, and a realtime transport.
 - Other games.
 
