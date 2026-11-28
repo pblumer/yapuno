@@ -9,6 +9,7 @@ import (
 	"github.com/pblumer/yapuno/internal/chatpage"
 	"github.com/pblumer/yapuno/internal/chesspage"
 	"github.com/pblumer/yapuno/internal/games"
+	"github.com/pblumer/yapuno/internal/review"
 )
 
 // FamilyGames stores chess games of guardians with their own children. It
@@ -87,6 +88,9 @@ func (h *playHandler) render(w http.ResponseWriter, r *http.Request, p Session, 
 		Path: "/family/play/" + url.PathEscape(child), Assets: "/family", CSRF: p.CSRFToken, ClientID: clientID, Alert: alert, Moved: moved}
 	if found {
 		in.View = &v
+		if v.Phase == games.Finished && len(v.Moves) > 0 {
+			in.Reviewed, in.Review = true, review.Cached(v.Moves, v.YourColor)
+		}
 	}
 	scriptHeaders(w)
 	if err := chesspage.Render(w, status, chesspage.Build(in)); err != nil {

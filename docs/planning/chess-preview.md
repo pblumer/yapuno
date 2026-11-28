@@ -44,6 +44,11 @@ The play and games files are needed together and require pairing and contacts; t
 - **The computer's ratings (easy 600, medium 900, hard 1200) are uncalibrated assumptions.** The number shows a child's own progress; it is not comparable with a club or FIDE rating.
 - Each game is rated once by its key, also time-outs, when the ended game is next read or compacted; ratings outlive the deletion of games and are deleted with the child's profile or the family.
 
+## Review after the game
+
+- After every finished game with moves, the page shows **Nachbesprechung** for the viewer's own moves: at most three moments, for example "Zug 4 (Bauer a2 nach a3): Hier hättest du schachmatt setzen können, mit Dame h5 nach f7, schlägt Bauer, schachmatt." Kinds: missed mate in one, a move that allowed mate in one, a move that lost material (with a rough size: a pawn, a minor piece, a rook, a queen), each with a better move.
+- Method: every legal move is scored two half-moves deep with captures and compared with the played move. It is a simple look, not a trainer's analysis, and the page says so. Nothing is stored; results are cached in memory. Measured: up to about 0.9 s for the first review of a 120-half-move game on the development container.
+
 ## Rules and outcomes
 
 - The server's rules engine ([`internal/chess`](../../internal/chess)) decides legality; perft counts of seven published reference positions match. The page offers only moves the server listed as legal, and the server checks every move again.

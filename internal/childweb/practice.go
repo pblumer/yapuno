@@ -10,6 +10,7 @@ import (
 	"github.com/pblumer/yapuno/internal/childsession"
 	"github.com/pblumer/yapuno/internal/games"
 	"github.com/pblumer/yapuno/internal/practice"
+	"github.com/pblumer/yapuno/internal/review"
 )
 
 // Practice stores one game per child against the computer. It must
@@ -61,6 +62,9 @@ func (h *handler) renderPractice(w http.ResponseWriter, r *http.Request, s child
 	if found {
 		in.View = &v.View
 		in.Practice.Level, in.Practice.CanTakeback = string(v.Level), v.CanTakeback
+		if v.Phase == games.Finished && len(v.Moves) > 0 {
+			in.Reviewed, in.Review = true, review.Cached(v.Moves, v.YourColor)
+		}
 	}
 	headers(w, true)
 	if err := chesspage.Render(w, status, chesspage.Build(in)); err != nil {

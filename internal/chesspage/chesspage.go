@@ -20,6 +20,7 @@ import (
 	"github.com/pblumer/yapuno/internal/chess"
 	"github.com/pblumer/yapuno/internal/fontassets"
 	"github.com/pblumer/yapuno/internal/games"
+	"github.com/pblumer/yapuno/internal/review"
 	"github.com/pblumer/yapuno/internal/skin"
 )
 
@@ -102,6 +103,9 @@ type Page struct {
 	// Practice against the computer.
 	Practice, CanStart, CanTakeback bool
 	Levels, Colors                  []ModeOption
+	// Review after the end of a game.
+	Reviewed    bool
+	ReviewItems []string
 }
 
 var pieceNames = map[chess.PieceType]string{chess.King: "König", chess.Queen: "Dame", chess.Rook: "Turm",
@@ -170,6 +174,46 @@ type Input struct {
 	Practice *Practice
 	// HomeLabel names the back link; empty means the child's crew.
 	HomeLabel string
+	// Reviewed says Review holds the review of a finished game for the
+	// viewer (possibly without findings).
+	Reviewed bool
+	Review   []review.Finding
+}
+
+func lossWords(loss int) string {
+	switch {
+	case loss < 250:
+		return "etwa ein Bauer"
+	case loss < 450:
+		return "etwa ein Läufer oder Springer"
+	case loss < 700:
+		return "etwa ein Turm"
+	}
+	return "etwa eine Dame"
+}
+
+// ReviewText explains one finding to a child. peer is the opponent's name
+// as it starts a sentence.
+func ReviewText(f review.Finding, peer string) string {
+	head := fmt.Sprintf("Zug %d (%s): ", f.Ply/2+1, Describe(f.Before, f.Played))
+	better := Describe(f.Before, f.Better)
+	switch f.Kind {
+	case review.MissedMate:
+		return head + "Hier hättest du schachmatt setzen können, mit " + better + "."
+	case review.AllowedMate:
+		return head + peer + " hätte danach mit einem Zug mattsetzen können. Besser war: " + better + "."
+	}
+	return head + "Danach ging " + lossWords(f.Loss) + " verloren. Besser war: " + better + "."
+}
+
+func reviewPage(p *Page, in Input) {
+	if !in.Reviewed {
+		return
+	}
+	p.Reviewed = true
+	for _, f := range in.Review {
+		p.ReviewItems = append(p.ReviewItems, ReviewText(f, in.Peer))
+	}
 }
 
 // Practice describes a game against the computer.
@@ -339,6 +383,7 @@ func Build(in Input) Page {
 		p.CanInvite = true
 		p.Modes = modes(v.Mode)
 		p.InviteTips = v.Tips
+		reviewPage(&p, in)
 	}
 	tips(&p, v, in.Peer)
 	return p
@@ -369,6 +414,7 @@ func buildPractice(p Page, in Input) Page {
 			p.Detail = "Möchtest du nochmals spielen?"
 		}
 		p.CanStart = true
+		reviewPage(&p, in)
 		return p
 	}
 	p.CanResign = true
@@ -606,6 +652,9 @@ const pageCSS = `body{margin:0}
 .yp-sq.yp-hint{box-shadow:inset 0 0 0 4px #2e7d32}
 .yp-tip{margin:.6rem 0;padding:.7rem .9rem;border-radius:var(--yp-radius);background:var(--yp-surface);border:2px solid #2e7d32}
 .yp-tip p{margin:.2rem 0}
+.yp-review{margin:.8rem 0;padding:.7rem .9rem;border-radius:var(--yp-radius);background:var(--yp-surface)}
+.yp-review ol{margin:.4rem 0;padding-left:1.3rem}
+.yp-review li{margin:.4rem 0}
 .yp-sq.yp-selected{box-shadow:inset 0 0 0 5px #1455a0}
 .yp-sq.yp-target::after{content:"";position:absolute;width:30%;height:30%;border-radius:50%;background:rgba(20,85,160,.55)}
 .yp-sq.yp-target.yp-capture::after{width:86%;height:86%;background:transparent;border:4px solid rgba(20,85,160,.7)}
@@ -653,6 +702,7 @@ var page = template.Must(template.New("chess").Funcs(template.FuncMap{"args": fu
 <div class="yp-pad">
 <p class="yp-sr" id="yp-announce" aria-live="assertive"></p>
 {{if .LastMove}}<p class="yp-last-move">{{.LastMove}}</p>{{end}}
+{{if .Reviewed}}<section class="yp-review" aria-labelledby="yp-review-title"><h2 class="yp-status" id="yp-review-title">Nachbesprechung</h2>{{if .ReviewItems}}<p>Daraus kannst du lernen:</p><ol>{{range .ReviewItems}}<li>{{.}}</li>{{end}}</ol>{{else}}<p>In dieser Partie wurde kein grober Fehler von dir gefunden.</p>{{end}}<p class="yp-note">Die Nachbesprechung schaut nur zwei Halbzüge weit und kann sich irren. Sie ersetzt keinen Trainer.</p></section>{{end}}
 {{if .TipText}}<div class="yp-tip" role="status"><p><strong>Tipp:</strong> {{.TipText}}</p>{{if .TipMove}}<p>{{.TipMove}}</p>{{end}}</div>{{end}}
 {{if or .CanTip .CanTipMove}}<div class="yp-actions">{{if .CanTip}}{{template "tip" (args .Page "1" "Tipp" "")}}{{end}}{{if .CanTipMove}}{{template "tip" (args .Page "2" "Zeig mir einen Zug" "")}}{{end}}</div>{{end}}
 {{if .TipsNote}}<p class="yp-note">{{.TipsNote}}</p>{{end}}

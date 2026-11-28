@@ -8,6 +8,7 @@ import (
 
 	"github.com/pblumer/yapuno/internal/chess"
 	"github.com/pblumer/yapuno/internal/games"
+	"github.com/pblumer/yapuno/internal/review"
 )
 
 func view(t *testing.T, mode games.Mode, color chess.Color, moves ...string) *games.View {
@@ -285,4 +286,47 @@ func TestPracticePage(t *testing.T) {
 	if p := Build(in); p.Status != "Schachmatt. Der Computer hat gewonnen." || !p.CanStart || !p.CanTakeback {
 		t.Fatalf("lost practice: %+v", p)
 	}
+}
+
+func TestReviewAfterTheGame(t *testing.T) {
+	v := view(t, games.Correspondence, chess.White, "e2e4", "e7e5", "d1h5", "b8c6", "f1c4", "g8f6", "a2a3", "f6h5")
+	v.Phase, v.End, v.Winner = games.Finished, games.EndResigned, chess.Black
+	in := input(v)
+	if p := Build(in); p.Reviewed {
+		t.Fatal("review shown without being computed")
+	}
+	in.Reviewed, in.Review = true, review.Review(v.Moves, chess.White)
+	p := Build(in)
+	if !p.Reviewed || len(p.ReviewItems) == 0 || !strings.HasPrefix(p.ReviewItems[0], "Zug 4 (Bauer a2 nach a3): Hier hättest du schachmatt setzen können, mit Dame h5 nach f7, schlägt Bauer, schachmatt.") {
+		t.Fatalf("review: %q", p.ReviewItems)
+	}
+	body := render(t, p)
+	if !strings.Contains(body, "Nachbesprechung") || !strings.Contains(body, "kann sich irren") {
+		t.Fatal("review not rendered")
+	}
+	in.Review = nil
+	if body := render(t, Build(in)); !strings.Contains(body, "kein grober Fehler") {
+		t.Fatal("empty review")
+	}
+	if got := ReviewText(review.Finding{Ply: 5, Kind: review.AllowedMate, Before: chess.StartPosition(), Played: mv(t, "g1f3"), Better: mv(t, "b1c3")}, "Der Computer"); got != "Zug 3 (Springer g1 nach f3): Der Computer hätte danach mit einem Zug mattsetzen können. Besser war: Springer b1 nach c3." {
+		t.Errorf("allowed mate: %q", got)
+	}
+	if got := ReviewText(review.Finding{Ply: 0, Kind: review.LostMaterial, Loss: 880, Before: chess.StartPosition(), Played: mv(t, "g1f3"), Better: mv(t, "b1c3")}, "Mia"); !strings.Contains(got, "etwa eine Dame verloren") {
+		t.Errorf("material: %q", got)
+	}
+	// Practice shows the review too.
+	in.Practice, in.Peer = &Practice{Level: "easy"}, "Der Computer"
+	in.Review = review.Review(v.Moves, chess.White)
+	if p := Build(in); !p.Reviewed || len(p.ReviewItems) == 0 {
+		t.Fatal("practice review")
+	}
+}
+
+func mv(t *testing.T, s string) chess.Move {
+	t.Helper()
+	m, err := chess.ParseUCI(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
 }

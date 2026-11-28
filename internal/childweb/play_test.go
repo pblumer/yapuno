@@ -226,7 +226,7 @@ func TestPlayAGameThroughForms(t *testing.T) {
 	if rec := pw.post(black.cookie, "/child/play/"+pw.ab+"/act", url.Values{"csrf_token": {f.csrf}, "client_id": {f.client}, "game": {game}, "kind": {"resign"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("resign: %d", rec.Code)
 	}
-	if body := pw.get("/child/play/"+pw.ab, white.cookie).Body.String(); !strings.Contains(body, black.name+" hat aufgegeben. Du hast gewonnen.") || !strings.Contains(body, black.name+" einladen") {
+	if body := pw.get("/child/play/"+pw.ab, white.cookie).Body.String(); !strings.Contains(body, black.name+" hat aufgegeben. Du hast gewonnen.") || !strings.Contains(body, black.name+" einladen") || !strings.Contains(body, "Nachbesprechung") {
 		t.Fatalf("after resign: %s", body)
 	}
 }
@@ -403,6 +403,18 @@ func TestPracticeRoutes(t *testing.T) {
 	}
 	if rec := pw.post(nil, "/child/practice/act", url.Values{"kind": {"resign"}}); rec.Code != http.StatusUnauthorized {
 		t.Errorf("signed out: %d", rec.Code)
+	}
+	if strings.Contains(pw.get("/child/practice", pw.alex).Body.String(), "Nachbesprechung") {
+		t.Fatal("review of a running game")
+	}
+	if rec := post("/child/practice/act", url.Values{"kind": {"move"}, "move": {"d2d4"}, "ply": {"0"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("move before resigning: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := post("/child/practice/act", url.Values{"kind": {"resign"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("resign: %d", rec.Code)
+	}
+	if !strings.Contains(pw.get("/child/practice", pw.alex).Body.String(), "Nachbesprechung") {
+		t.Fatal("no review after practice")
 	}
 	// Switching chess off stops practice too.
 	if err := pw.settings.SetEnabled("guardian-a", "tenant-a", "child-a", play.GameChess, false); err != nil {

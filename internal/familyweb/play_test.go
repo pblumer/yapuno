@@ -148,6 +148,12 @@ func TestGuardianPlaysOwnChild(t *testing.T) {
 	if v, _, _ := pw.games.GuardianLatest(games.GuardianPrincipal{TenantID: "tenant-a", GuardianID: "guardian-a"}, "child-a"); v.End != games.EndWithdrawn {
 		t.Fatalf("after withdraw: %+v", v)
 	}
+	// A game without moves has nothing to review.
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/family/play/child-a", nil))
+	if strings.Contains(w.Body.String(), "Nachbesprechung") {
+		t.Fatal("review of a game without moves")
+	}
 }
 
 func TestOtherGuardiansCannotPlayAChild(t *testing.T) {

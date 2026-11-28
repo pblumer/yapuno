@@ -14,6 +14,7 @@ import (
 	"github.com/pblumer/yapuno/internal/childsession"
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/games"
+	"github.com/pblumer/yapuno/internal/review"
 )
 
 // Games stores chess games. It must authorize every call from current
@@ -113,6 +114,9 @@ func (h *handler) renderPlay(w http.ResponseWriter, r *http.Request, s childsess
 		CSRF: s.CSRFToken, ClientID: clientID, Alert: alert, Moved: moved}
 	if found {
 		in.View = &v
+		if v.Phase == games.Finished && len(v.Moves) > 0 {
+			in.Reviewed, in.Review = true, review.Cached(v.Moves, v.YourColor)
+		}
 	}
 	headers(w, true)
 	if err := chesspage.Render(w, status, chesspage.Build(in)); err != nil {

@@ -1,7 +1,7 @@
 # ADR-DRAFT: Chess between approved contacts, played live or by correspondence
 
 - **Status:** Proposed
-- **Implementation:** First slice on a branch (pending review): rules engine, guardian switch, game store, child chess page and guardian games page as a synthetic browser preview, with tips, practice against the computer, games with the own guardians and a private rating; see [chess preview](../planning/chess-preview.md). No quota, no notifications, no real-device evidence.
+- **Implementation:** First slice on a branch (pending review): rules engine, guardian switch, game store, child chess page and guardian games page as a synthetic browser preview, with tips, practice against the computer, games with the own guardians, a private rating and a review after the game; see [chess preview](../planning/chess-preview.md). No quota, no notifications, no real-device evidence.
 - **Date:** 2026-11-28
 - **Deciders:** maintainers; child-safety, privacy and accessibility review required before real use
 
@@ -106,6 +106,11 @@ Chosen options (if approved): **own rules engine, polling, clock from server tim
 - Elo with K = 40 (the FIDE factor for juniors), starting at 1000, marked "vorläufig" until 10 rated games. Rated are games that ended with a result by the rules, resignation, time-out or agreed draw; declined, withdrawn, expired, aborted and abandoned games are not.
 - Opponents: other children; guardians, who always count as a fixed 1000 so that **no rating of an adult is stored** (data minimisation; a guardian's real strength is ignored, which makes the child's rating less precise in family games); and the computer at fixed, **uncalibrated** ratings (easy 600, medium 900, hard 1200). These anchors are assumptions; the number is meaningful for the child's own progress, not as a comparison with any official rating. A practice game counts only if no tip and no takeback was used. A rating falls after a loss; that is intended.
 - Ratings are stored separately from games, because games are deleted 30 days after their end. Each game is rated exactly once (idempotent by game), also for ends that follow from time alone; the rating is applied when the ended game is next read or compacted. Ratings are deleted with the child's profile or the family. Guardian rows written by an earlier version are dropped on load.
+
+### Review after the game
+- When a game has ended, each player sees a short review of **their own** moves on the game page: at most three moments, in game order, of three kinds: a mate in one that was missed, a move after which the opponent could mate at once, and a move after which material was lost (at least about one and a half pawns). Each names a better move. Without findings, the page says that no serious mistake was found.
+- Every legal move of the position is scored two half-moves deep with captures (`chess.ScoreMoves`), so the played move can be compared with the best one. This is a simple look for children; the page says that it can be wrong and does not replace a trainer.
+- The review is derived from the move list alone, stores nothing and is cached in memory by move list; the first review of a very long game costs up to about a second of server time.
 
 ### Not decided here
 - **Playtime quota.** The quota policy of issue #19 is not enforced in this slice. A time-based quota does not fit correspondence games that last days; options are a daily number of moves or games, or a quota for live games only. This needs a product decision and its own ADR.
