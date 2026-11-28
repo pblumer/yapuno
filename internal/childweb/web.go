@@ -83,6 +83,8 @@ type Options struct {
 	// Family lists the child's conversations with its own guardians. Their
 	// messages go through Messages like every other conversation.
 	Family FamilyChats
+	// Push lets a child switch content-free notifications on for its device.
+	Push Push
 }
 
 // FamilyThread is the conversation of the authenticated child with one of
@@ -122,6 +124,9 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 	if opt.ReportNotices && opt.Reports == nil {
 		return nil, errors.New("report notices require reporting")
 	}
+	if !opt.Push.valid() {
+		return nil, errors.New("notifications require both the key and the subscriptions")
+	}
 	h := &handler{sessions: sessions, children: children, opt: opt}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /child", h.home)
@@ -130,6 +135,19 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 	mux.HandleFunc("POST /child/session/challenge", h.challenge)
 	mux.HandleFunc("POST /child/session/login", h.login)
 	mux.HandleFunc("POST /child/session/logout", h.logout)
+	// The installable app: public and free of personal data.
+	mux.HandleFunc("GET /child/manifest.webmanifest", manifest)
+	mux.HandleFunc("GET /child/icon-192.png", iconHandler(192))
+	mux.HandleFunc("GET /child/icon-512.png", iconHandler(512))
+	mux.HandleFunc("GET /child/apple-touch-icon.png", iconHandler(180))
+	if opt.Push.enabled() {
+		mux.HandleFunc("GET /child/sw.js", serviceWorker)
+		mux.HandleFunc("GET /child/push.js", h.asset(pushJS))
+		mux.HandleFunc("GET /child/push-utils.js", h.asset(pushUtilsJS))
+		mux.HandleFunc("GET /child/notifications", h.notifications)
+		mux.HandleFunc("POST /child/push/subscription", h.subscribe)
+		mux.HandleFunc("POST /child/push/unsubscribe", h.unsubscribe)
+	}
 	if opt.Looks != nil {
 		mux.HandleFunc("GET /child/look", h.lookView)
 		mux.HandleFunc("POST /child/look", h.lookSave)
@@ -153,6 +171,16 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 	return mux, nil
 }
 
+// Content security policies of the child pages. The manifest is allowed on
+// every page so that each of them can be added to the Home Screen, and
+// same-origin images for its icon; only the
+// notifications page may register the service worker.
+const (
+	cspStatic  = "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+	cspScripts = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+	cspWorker  = cspScripts + "; worker-src 'self'"
+)
+
 func headers(w http.ResponseWriter, scripts bool) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
@@ -160,9 +188,9 @@ func headers(w http.ResponseWriter, scripts bool) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
-	csp := "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+	csp := cspStatic
 	if scripts {
-		csp = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+		csp = cspScripts
 	}
 	w.Header().Set("Content-Security-Policy", csp)
 }
@@ -282,6 +310,11 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid CSRF token", http.StatusForbidden)
 		return
 	}
+	if h.opt.Push.enabled() {
+		// A signed-out device is told nothing more. A failure must not keep
+		// the session alive; the subscription then ends with the device.
+		_ = h.opt.Push.Subscriptions.Unsubscribe(device(s))
+	}
 	h.sessions.Logout(w, r)
 	// The marker stops the login shell from signing the device in again at once.
 	http.Redirect(w, r, "/child?signed_out=1", http.StatusSeeOther)
@@ -318,7 +351,7 @@ const homeCSS = `body{margin:0}
 .yp-alert{border:2px solid var(--yp-danger-text)}
 `
 
-var homePage = template.Must(template.New("child-home").Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>Yapuno</title><style>{{.CSS}}</style></head><body>
+var homePage = template.Must(template.New("child-home").Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>Yapuno</title>` + appHead + `<style>{{.CSS}}</style></head><body>
 <main class="yp-child" data-yp-skin="{{.Skin}}"><div class="yp-shell">
 <header class="yp-top"><div class="yp-logo">ya<span>puno</span></div>{{if .LookHref}}<a class="yp-me" href="{{.LookHref}}" aria-label="Mein Look">{{.Figure}}</a>{{else}}{{.Figure}}{{end}}</header>
 <h1>Hoi {{.Name}}!</h1>
@@ -330,6 +363,7 @@ var homePage = template.Must(template.New("child-home").Parse(`<!doctype html><h
 {{if .Blocked}}<h2>Blockiert</h2><ul class="yp-crew">{{range .Blocked}}<li><span class="yp-initial" aria-hidden="true">{{.Initial}}</span><span>{{.Name}}</span></li>{{end}}</ul><p class="yp-muted">Ihr könnt euch nicht schreiben. Nur deine Eltern können eine Blockierung aufheben.</p>{{end}}
 <p class="yp-note">{{if .Chats}}Tippe auf einen Namen, um zu schreiben. Das hier ist eine Vorschau.{{else}}Nachrichten schreiben kommt bald. Das hier ist eine Vorschau.{{end}}</p>
 {{if .LookHref}}<p><a class="yp-link" href="{{.LookHref}}">Mein Look ändern</a></p>{{end}}
+{{if .Notifications}}<p><a class="yp-link" href="/child/notifications">Benachrichtigungen</a></p>{{end}}
 <form method="post" action="/child/session/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit">Auf diesem Gerät abmelden</button></form>
 </div></main></body></html>{{define "face"}}{{if .Figure}}{{.Figure}}{{else}}<span class="yp-initial" aria-hidden="true">{{.Initial}}</span>{{end}}{{end}}`))
 
@@ -396,12 +430,13 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 		Crew, Blocked    []crewMember
 		Parents          []crewMember
 		Chats            bool
+		Notifications    bool
 		LookHref         string
 	}{
 		Skin: def.ID, Name: name, CSRF: s.CSRFToken, Notice: fixedNotice(r, homeNotices), Blocked: blocked,
 		// Validated first-party skin tokens and fixed component rules only.
 		CSS:    template.CSS(fontassets.FaceCSS(def.Typography.Heading, def.Typography.Body) + ".yp-child{" + decls + "}\n" + homeCSS),
-		Figure: figure, Crew: crew, Parents: h.parents(s), Chats: h.opt.Messages != nil, LookHref: lookHref,
+		Figure: figure, Crew: crew, Parents: h.parents(s), Chats: h.opt.Messages != nil, Notifications: h.opt.Push.enabled(), LookHref: lookHref,
 	})
 }
 
