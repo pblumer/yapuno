@@ -3,6 +3,7 @@ package childweb
 import (
 	"crypto/subtle"
 	"errors"
+	"html/template"
 	"mime"
 	"net/http"
 	"net/url"
@@ -60,8 +61,35 @@ func (h *handler) playNote(s childsession.Session, contactID string) (string, bo
 
 // renderPlay writes the chess page for one of the child's own contacts.
 // A child that may not play with this contact is sent back home.
+// playPeer names the other player of a scope: a child of one of the
+// child's own contacts, or one of the child's own guardians.
+func (h *handler) playPeer(s childsession.Session, scope string) (string, template.HTML, bool) {
+	self := contacts.Party{TenantID: s.TenantID, ChildID: s.ChildID}
+	if name, ok := h.peerName(s, scope); ok {
+		return name, h.peerFigure(self, scope), true
+	}
+	if t, ok := h.familyGame(s, scope); ok {
+		return t.Name, h.guardianFigure(t.Guardian), true
+	}
+	return "", "", false
+}
+
+// familyGame returns the child's guardian whose game scope this is.
+func (h *handler) familyGame(s childsession.Session, scope string) (FamilyThread, bool) {
+	if h.opt.Family == nil {
+		return FamilyThread{}, false
+	}
+	for _, t := range h.opt.Family.FamilyThreads(s) {
+		if t.Guardian.Kind == appearance.KindGuardian && t.Guardian.TenantID == s.TenantID &&
+			games.FamilyScope(s.TenantID, t.Guardian.ID, s.ChildID) == scope {
+			return t, true
+		}
+	}
+	return FamilyThread{}, false
+}
+
 func (h *handler) renderPlay(w http.ResponseWriter, r *http.Request, s childsession.Session, contactID string, status int, alert, moved string) {
-	name, ok := h.peerName(s, contactID)
+	name, figure, ok := h.playPeer(s, contactID)
 	if !ok {
 		http.Redirect(w, r, "/child", http.StatusSeeOther)
 		return
@@ -80,7 +108,7 @@ func (h *handler) renderPlay(w http.ResponseWriter, r *http.Request, s childsess
 	if h.opt.Looks != nil {
 		pref = h.opt.Looks.Get(appearance.Subject{Kind: appearance.KindChild, TenantID: s.TenantID, ID: s.ChildID})
 	}
-	in := chesspage.Input{Peer: name, PeerFigure: h.peerFigure(contacts.Party{TenantID: s.TenantID, ChildID: s.ChildID}, contactID),
+	in := chesspage.Input{Peer: name, PeerFigure: figure,
 		Skin: pref.Skin, Home: "/child", Path: "/child/play/" + contactID, Assets: "/child",
 		CSRF: s.CSRFToken, ClientID: clientID, Alert: alert, Moved: moved}
 	if found {

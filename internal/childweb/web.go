@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"io"
 	"mime"
@@ -24,6 +25,8 @@ import (
 	"github.com/pblumer/yapuno/internal/childsession"
 	"github.com/pblumer/yapuno/internal/contacts"
 	"github.com/pblumer/yapuno/internal/fontassets"
+	"github.com/pblumer/yapuno/internal/games"
+	"github.com/pblumer/yapuno/internal/rating"
 	"github.com/pblumer/yapuno/internal/sameorigin"
 	"github.com/pblumer/yapuno/internal/skin"
 )
@@ -86,6 +89,8 @@ type Options struct {
 	// Games enables chess with contacts. It requires Contacts, which names
 	// the other child.
 	Games Games
+	// Ratings shows the child its own chess rating, and nothing else.
+	Ratings Ratings
 	// Practice enables chess against the computer.
 	Practice Practice
 }
@@ -339,16 +344,17 @@ var homePage = template.Must(template.New("child-home").Parse(`<!doctype html><h
 <header class="yp-top"><div class="yp-logo">ya<span>puno</span></div>{{if .LookHref}}<a class="yp-me" href="{{.LookHref}}" aria-label="Mein Look">{{.Figure}}</a>{{else}}{{.Figure}}{{end}}</header>
 <h1>Hoi {{.Name}}!</h1>
 {{if .Notice}}<p class="yp-status" role="status">{{.Notice}}</p>{{end}}<p class="yp-muted">Schön, dass du da bist.</p>
-{{if .Parents}}<h2>Deine Eltern</h2><ul class="yp-crew">{{range .Parents}}<li><a href="/child/chat/{{.Chat}}">{{template "face" .}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}</ul><p class="yp-muted">Was ihr hier schreibt, sehen nur du und dieser Elternteil.</p>{{end}}
+{{if .Parents}}<h2>Deine Eltern</h2><ul class="yp-crew">{{range .Parents}}<li><a href="/child/chat/{{.Chat}}">{{template "face" .}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a>{{template "play" .}}</li>{{end}}</ul><p class="yp-muted">Was ihr hier schreibt, sehen nur du und dieser Elternteil.</p>{{end}}
 <h2>Deine Crew</h2>
-{{if .Crew}}<ul class="yp-crew">{{range .Crew}}<li>{{if .Chat}}<a href="/child/chat/{{.Chat}}">{{template "face" .}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a>{{else}}{{template "face" .}}<span>{{.Name}}</span>{{end}}{{if .Play}}<a class="yp-play-link" href="/child/play/{{.Play}}" aria-label="Schach mit {{.Name}}{{if .PlayNote}}: {{.PlayNote}}{{end}}"><span aria-hidden="true">♞&#xFE0E;</span>{{if .PlayNote}}<small aria-hidden="true">{{.PlayNote}}</small>{{end}}</a>{{end}}</li>{{end}}</ul>{{else}}<p class="yp-empty">Noch niemand in deiner Crew. Deine Eltern können dich mit anderen Kindern verbinden.</p>{{end}}
+{{if .Crew}}<ul class="yp-crew">{{range .Crew}}<li>{{if .Chat}}<a href="/child/chat/{{.Chat}}">{{template "face" .}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a>{{else}}{{template "face" .}}<span>{{.Name}}</span>{{end}}{{template "play" .}}</li>{{end}}</ul>{{else}}<p class="yp-empty">Noch niemand in deiner Crew. Deine Eltern können dich mit anderen Kindern verbinden.</p>{{end}}
 <p class="yp-muted">In deiner Crew sind nur Kinder, denen beide Familien zugestimmt haben. Fremde können dich nicht finden.</p>
+{{if .Rating}}<p class="yp-note" id="yp-rating">Deine Schachwertung: <strong>{{.Rating}}</strong>{{if .RatingNote}} ({{.RatingNote}}){{end}}. Nur du siehst diese Zahl. Sie zeigt, wie du dich verbesserst, nicht wer besser ist.</p>{{end}}
 {{if .Practice}}<h2>Üben</h2><ul class="yp-crew"><li><a href="/child/practice"><span class="yp-initial" aria-hidden="true">♞&#xFE0E;</span><span>Schach gegen den Computer</span><span class="yp-go" aria-hidden="true">›</span></a></li></ul>{{end}}
 {{if .Blocked}}<h2>Blockiert</h2><ul class="yp-crew">{{range .Blocked}}<li><span class="yp-initial" aria-hidden="true">{{.Initial}}</span><span>{{.Name}}</span></li>{{end}}</ul><p class="yp-muted">Ihr könnt euch nicht schreiben. Nur deine Eltern können eine Blockierung aufheben.</p>{{end}}
 <p class="yp-note">{{if .Chats}}Tippe auf einen Namen, um zu schreiben. Das hier ist eine Vorschau.{{else}}Nachrichten schreiben kommt bald. Das hier ist eine Vorschau.{{end}}</p>
 {{if .LookHref}}<p><a class="yp-link" href="{{.LookHref}}">Mein Look ändern</a></p>{{end}}
 <form method="post" action="/child/session/logout"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><button type="submit">Auf diesem Gerät abmelden</button></form>
-</div></main></body></html>{{define "face"}}{{if .Figure}}{{.Figure}}{{else}}<span class="yp-initial" aria-hidden="true">{{.Initial}}</span>{{end}}{{end}}`))
+</div></main></body></html>{{define "play"}}{{if .Play}}<a class="yp-play-link" href="/child/play/{{.Play}}" aria-label="Schach mit {{.Name}}{{if .PlayNote}}: {{.PlayNote}}{{end}}"><span aria-hidden="true">♞&#xFE0E;</span>{{if .PlayNote}}<small aria-hidden="true">{{.PlayNote}}</small>{{end}}</a>{{end}}{{end}}{{define "face"}}{{if .Figure}}{{.Figure}}{{else}}<span class="yp-initial" aria-hidden="true">{{.Initial}}</span>{{end}}{{end}}`))
 
 type crewMember struct {
 	Name     string
@@ -408,6 +414,14 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 		lookHref = "/child/look"
 	}
 	decls := strings.TrimSuffix(strings.TrimPrefix(tokens, ":root{"), "}")
+	var rated rating.Rating
+	if h.opt.Ratings != nil {
+		// Only the signed-in child's own rating is ever looked up.
+		rated = h.opt.Ratings.Of(rating.Player{Kind: rating.Child, TenantID: s.TenantID, ID: s.ChildID})
+		if rated.Games == 0 {
+			rated = rating.Rating{}
+		}
+	}
 	headers(w, false)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = homePage.Execute(w, struct {
@@ -420,13 +434,33 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 		Chats            bool
 		LookHref         string
 		Practice         bool
+		Rating           int
+		RatingNote       string
 	}{
+		Rating: rated.Value, RatingNote: ratingNote(rated),
 		Practice: h.mayPractice(s),
 		Skin:     def.ID, Name: name, CSRF: s.CSRFToken, Notice: fixedNotice(r, homeNotices), Blocked: blocked,
 		// Validated first-party skin tokens and fixed component rules only.
 		CSS:    template.CSS(fontassets.FaceCSS(def.Typography.Heading, def.Typography.Body) + ".yp-child{" + decls + "}\n" + homeCSS),
 		Figure: figure, Crew: crew, Parents: h.parents(s), Chats: h.opt.Messages != nil, LookHref: lookHref,
 	})
+}
+
+// Ratings looks up chess ratings.
+type Ratings interface {
+	Of(rating.Player) rating.Rating
+}
+
+func ratingNote(r rating.Rating) string {
+	switch {
+	case r.Games == 0:
+		return ""
+	case r.Provisional && r.Games == 1:
+		return "vorläufig, nach 1 Partie"
+	case r.Provisional:
+		return fmt.Sprintf("vorläufig, nach %d Partien", r.Games)
+	}
+	return fmt.Sprintf("nach %d Partien", r.Games)
 }
 
 // parents lists the child's conversations with its own guardians.
@@ -436,7 +470,14 @@ func (h *handler) parents(s childsession.Session) []crewMember {
 	}
 	var out []crewMember
 	for _, t := range h.opt.Family.FamilyThreads(s) {
-		out = append(out, crewMember{Name: t.Name, Initial: initialOf(t.Name), Chat: t.ID, Figure: h.guardianFigure(t.Guardian)})
+		member := crewMember{Name: t.Name, Initial: initialOf(t.Name), Chat: t.ID, Figure: h.guardianFigure(t.Guardian)}
+		if t.Guardian.Kind == appearance.KindGuardian && t.Guardian.TenantID == s.TenantID {
+			scope := games.FamilyScope(s.TenantID, t.Guardian.ID, s.ChildID)
+			if note, ok := h.playNote(s, scope); ok {
+				member.Play, member.PlayNote = scope, note
+			}
+		}
+		out = append(out, member)
 	}
 	return out
 }
