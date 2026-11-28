@@ -33,10 +33,11 @@ var homePage = template.Must(template.New("home").Parse(`<!doctype html><html la
 {{if .Alert}}<p class="yp-alert" role="alert">{{.Alert}}</p>{{end}}
 {{if .Notice}}<p class="yp-status" role="status">{{.Notice}}</p>{{end}}
 {{range .Children}}<section aria-labelledby="yp-child-{{.N}}"><h2 id="yp-child-{{.N}}">{{.Name}}</h2>
-{{if or .Devices .Contacts .Chat}}<ul class="yp-rows">
+{{if or .Devices .Contacts .Chat .Games}}<ul class="yp-rows">
 {{if .Devices}}<li><a href="/family/devices?child_id={{.ID}}"><span>Geräte von {{.Name}}<small>Handy oder Tablet verbinden und verwalten</small></span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 {{if .Contacts}}<li><a href="/family/contacts?child_id={{.ID}}"><span>Kontakte von {{.Name}}<small>{{if .Reports}}{{.Reports}}{{else}}Mit Kindern anderer Familien verbinden{{end}}</small></span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 {{if .Chat}}<li><a href="/family/chat/{{.Chat}}"><span>Mit {{.Name}} schreiben</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
+{{if .Games}}<li><a href="/family/games?child_id={{.ID}}"><span>Spiele von {{.Name}}<small>Schach erlauben oder nicht</small></span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 {{if .Devices}}<li><a href="/family/devices/lost?child_id={{.ID}}"><span>Gerät von {{.Name}} verloren?</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}
 </ul>{{end}}{{if not (or .Devices .Contacts)}}<p class="yp-muted">{{if .Full}}Geräte und Kontakte sind auf dieser Installation nicht eingeschaltet.{{else}}Für dieses Profil hast du keine Verwaltungsrechte.{{end}}</p>{{end}}
 {{if .Full}}<details><summary>Namen ändern</summary><form method="post" action="/family/rename"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><input type="hidden" name="child_id" value="{{.ID}}"><label class="yp-field" for="yp-name-{{.N}}">Neuer Name für {{.Name}}</label><input type="text" id="yp-name-{{.N}}" name="name" value="{{.Name}}" required maxlength="40" autocomplete="off"><button class="yp-secondary" type="submit">Speichern</button></form></details>{{end}}
@@ -110,6 +111,7 @@ type homeChild struct {
 	Devices  bool
 	Contacts bool
 	Full     bool
+	Games    bool
 	Chat     string // id of the guardian's conversation with this child
 	Reports  string
 }
@@ -156,6 +158,7 @@ func (h *handler) view(w http.ResponseWriter, r *http.Request) {
 			Devices:  h.devicesEnabled && c.Permissions.ManageDevices,
 			Contacts: h.contactsEnabled && c.Permissions.ApproveContacts,
 			Full:     c.Permissions.ManageDevices && c.Permissions.ApproveContacts,
+			Games:    h.gamesEnabled && c.Permissions.ApproveContacts,
 			Chat:     chats[c.ID], Reports: reports[c.ID]})
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

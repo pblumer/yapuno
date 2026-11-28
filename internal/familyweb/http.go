@@ -76,6 +76,9 @@ type Options struct {
 	// DeletePages links each child a guardian fully answers for to
 	// "Profil löschen" (NewDeletePages).
 	DeletePages bool
+	// GamePages links each child a guardian may approve contacts for to
+	// "Spiele" (NewGamePages).
+	GamePages bool
 }
 
 // NewWithOptions builds the fail-closed family overview handler.
@@ -83,7 +86,7 @@ func NewWithOptions(auth Authenticator, store FamilyStore, opt Options) (http.Ha
 	if auth == nil || store == nil {
 		return nil, errors.New("authenticator and store are required")
 	}
-	h := &handler{auth: auth, store: store, looks: opt.Looks, devicesEnabled: opt.DevicePages, contactsEnabled: opt.ContactPages, securityEnabled: opt.SecurityPages, reports: opt.Reports, children: opt.Children, inviteEnabled: opt.InvitePages, chat: opt.Chat, inactive: opt.Inactive, version: opt.Version, deleteEnabled: opt.DeletePages, guardianNames: opt.Names}
+	h := &handler{auth: auth, store: store, looks: opt.Looks, devicesEnabled: opt.DevicePages, contactsEnabled: opt.ContactPages, securityEnabled: opt.SecurityPages, reports: opt.Reports, children: opt.Children, inviteEnabled: opt.InvitePages, chat: opt.Chat, inactive: opt.Inactive, version: opt.Version, deleteEnabled: opt.DeletePages, guardianNames: opt.Names, gamesEnabled: opt.GamePages}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /family", h.view)
 	mux.HandleFunc("POST /family/rename", h.rename)
@@ -110,6 +113,7 @@ type handler struct {
 	version         string
 	deleteEnabled   bool
 	guardianNames   GuardianNames
+	gamesEnabled    bool
 }
 
 func (h *handler) session(w http.ResponseWriter, r *http.Request) (Session, bool) {
