@@ -20,12 +20,15 @@ import (
 	"github.com/pblumer/yapuno/internal/devicepairing/pairingtest"
 	"github.com/pblumer/yapuno/internal/familydashboard"
 	"github.com/pblumer/yapuno/internal/familystore"
+	"github.com/pblumer/yapuno/internal/games"
 	"github.com/pblumer/yapuno/internal/guardianchat"
 	"github.com/pblumer/yapuno/internal/guardiandirectory"
 	"github.com/pblumer/yapuno/internal/guardianlock"
 	"github.com/pblumer/yapuno/internal/guardiannames"
 	"github.com/pblumer/yapuno/internal/guardiansession"
 	"github.com/pblumer/yapuno/internal/messages"
+	"github.com/pblumer/yapuno/internal/play"
+	"github.com/pblumer/yapuno/internal/rating"
 	"github.com/pblumer/yapuno/internal/reports"
 	"github.com/pblumer/yapuno/internal/signup"
 )
@@ -173,6 +176,11 @@ type securityServer struct {
 	contacts     *contacts.Store
 	messages     *messages.Store
 	guardianChat *guardianchat.Store
+	// chess switches chess, practice and ratings on; it needs chatPath.
+	chess    bool
+	settings *play.Settings
+	games    *games.Store
+	ratings  *rating.Store
 }
 
 const threeGuardians = `{"guardians":[{"email":"anna@example.org","guardian_id":"guardian-a","tenant_id":"tenant-a","active":true},{"email":"ben@example.org","guardian_id":"guardian-a2","tenant_id":"tenant-a","active":true},{"email":"bea-parent@example.org","guardian_id":"guardian-b","tenant_id":"tenant-b","active":true}]}`
@@ -251,6 +259,25 @@ func (s *securityServer) start(withLocks bool) {
 		chat := s.guardianChat
 		s.t.Cleanup(func() { _ = chat.Close() })
 		opt.contacts, opt.messages, opt.guardianChat = s.contacts, s.messages, s.guardianChat
+	}
+	if s.chess {
+		var err error
+		dir := s.root
+		if s.settings, err = play.OpenSettings(filepath.Join(dir, "play.json"), s.families); err != nil {
+			s.t.Fatal(err)
+		}
+		if s.games != nil {
+			_ = s.games.Close()
+		}
+		if s.games, err = games.Open(filepath.Join(dir, "games.log"), s.contacts, s.pairing, s.families, s.settings, time.Now); err != nil {
+			s.t.Fatal(err)
+		}
+		g := s.games
+		s.t.Cleanup(func() { _ = g.Close() })
+		if s.ratings, err = rating.Open(filepath.Join(dir, "ratings.json"), time.Now); err != nil {
+			s.t.Fatal(err)
+		}
+		opt.play, opt.games, opt.ratings = s.settings, s.games, s.ratings
 	}
 	if s.everything {
 		var err error

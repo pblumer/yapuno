@@ -12,7 +12,7 @@ export YAPUNO_GAMES_FILE=private/games.log
 go run ./cmd/yapuno-web
 ```
 
-Practice against the computer additionally needs `export YAPUNO_PRACTICE_FILE=private/practice.json`, which requires the two chess files.
+Practice against the computer additionally needs `export YAPUNO_PRACTICE_FILE=private/practice.json`, the private rating `export YAPUNO_RATINGS_FILE=private/ratings.json`; both require the two chess files. Games between a guardian and their own child are on when the guardians' chat (`YAPUNO_GUARDIAN_CHAT_FILE`) is on as well, because that is where a child sees its guardians.
 
 The play and games files are needed together and require pairing and contacts; the server refuses to start otherwise. Both files are created with mode `0600`. Without them, no chess route or link exists and the family overview lists "Schach" as inactive.
 
@@ -30,6 +30,19 @@ The play and games files are needed together and require pairing and contacts; t
 - **Practice against the computer** (`/child/practice`): three levels (easy plays at one half-move with deliberate randomness, medium at two, hard at three half-moves plus captures), choice of colour, unlimited tips, taking back the last own move, resigning. No clock and no polling: the computer answers within the same request.
 - **These are heuristics for children, not engine analysis.** Attackers and defenders are counted without exchanges, pins or x-rays, and the search looks only a few half-moves ahead with a simple evaluation. In the headless check, the move tip after 1.e4 e5 2.Nf3 Nc6 was "Läufer f1 nach d3": legal and not losing, but a move a chess teacher would not recommend, because it blocks the d-pawn. The texts therefore say "ein guter Zug", not "der beste Zug". A better evaluation is possible later; it needs tests against positions a trainer has judged.
 - Cost: the hardest search took at most about 60 ms in complex middlegame positions on the development container; the node limit bounds it. A child may make at most 30 practice moves or tip requests per minute.
+
+## Playing with the own guardians
+
+- Under **Deine Eltern** a knight next to each guardian leads to the family game; on the family overview **Schach mit …** leads to it from the guardian's side. Either side may invite; tips work as between children.
+- Authorization: `authz.CanPlayFamilyGame` — a current grant for exactly this child (no management capability needed), the guardian identity active and not locked, the child profile, the child's approved device when the child acts, and chess allowed for the child. Guardians of other families cannot reach the game, also not with a guessed path; a guardian session gets `401` on child routes.
+- A family game is identified by a derived pair id of guardian and child; the page carries no other identifier.
+
+## Private rating
+
+- Each child sees **its own** rating on its home page, with "vorläufig" for the first ten rated games and the sentence "Nur du siehst diese Zahl. Sie zeigt, wie du dich verbesserst, nicht wer besser ist." Nobody else sees it: not other children, not guardians, no list. Guardians' ratings are kept only as opponents' strength and shown to nobody.
+- Elo, K = 40, start 1000. Rated: results by the rules, resignation, time-out, agreed draw. Not rated: declined, withdrawn, expired, aborted, abandoned games, and practice games with a tip or a takeback.
+- **The computer's ratings (easy 600, medium 900, hard 1200) are uncalibrated assumptions.** The number shows a child's own progress; it is not comparable with a club or FIDE rating.
+- Each game is rated once by its key, also time-outs, when the ended game is next read or compacted; ratings outlive the deletion of games and are deleted with the child's profile or the family.
 
 ## Rules and outcomes
 
@@ -59,7 +72,7 @@ Page rendered at 320 and 390 CSS px: no horizontal overflow; tap on a bishop hig
 ## Limitations
 
 - No playtime quota (#19 leaves the semantics open).
-- Tips and the computer opponent are simple heuristics (see above); no ratings or rankings.
+- Tips and the computer opponent are simple heuristics (see above); the rating is private and not calibrated; there are no rankings.
 - No notifications; a child sees an invitation or a move only when opening Yapuno.
 - Polling, not realtime; single server process; all games in memory.
-- Games between siblings, with guardians or in groups are not possible.
+- Games between siblings, with guardians of other families or in groups are not possible. Family games need the guardians' chat to be on.

@@ -94,7 +94,7 @@ type Page struct {
 	MoveText string // the text a failed no-script move keeps
 
 	Title, Subtitle, ResignText string
-	HomeLabel                  string
+	HomeLabel                   string
 	// Tips: a level-1 tip explains (TipText), a level-2 tip adds a move.
 	TipText, TipMove, TipsNote string
 	CanTip, CanTipMove         bool

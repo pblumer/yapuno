@@ -40,6 +40,7 @@ import (
 	"github.com/pblumer/yapuno/internal/pairingweb"
 	"github.com/pblumer/yapuno/internal/play"
 	"github.com/pblumer/yapuno/internal/practice"
+	"github.com/pblumer/yapuno/internal/rating"
 	"github.com/pblumer/yapuno/internal/reports"
 	"github.com/pblumer/yapuno/internal/signup"
 )
@@ -97,6 +98,8 @@ type optionalStores struct {
 	games *games.Store
 	// practice stores games against the computer; it needs games.
 	practice *practice.Store
+	// ratings keeps each child's private chess rating; it needs games.
+	ratings *rating.Store
 	// now is the clock for report notices and reminders; nil means time.Now.
 	now func() time.Time
 }
@@ -371,6 +374,9 @@ func newEraser(families *familystore.Store, directory *guardiandirectory.Directo
 	if opt.practice != nil {
 		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "practice games", Store: opt.practice})
 	}
+	if opt.ratings != nil {
+		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "chess ratings", Store: opt.ratings})
+	}
 	if opt.messages != nil {
 		cfg.Logs = append(cfg.Logs, erasure.Log{Name: "the children's chat", Log: opt.messages})
 	}
@@ -469,6 +475,24 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 			return nil, errors.New("chess requires game settings, contacts and device pairing")
 		}
 		familyOptions.GamePages = true
+		// Guardians play their own children where the guardians' chat,
+		// which shows a child its guardians, is on. The directory knows
+		// emergency locks.
+		if opt.guardianChat != nil {
+			if err := opt.games.EnableFamilies(store, directory); err != nil {
+				return nil, err
+			}
+			familyOptions.FamilyGames = opt.games
+		}
+	}
+	if opt.ratings != nil {
+		if opt.games == nil {
+			return nil, errors.New("ratings require chess")
+		}
+		opt.games.SetRater(opt.ratings)
+		if opt.practice != nil {
+			opt.practice.SetRater(opt.ratings)
+		}
 	}
 	if opt.practice != nil && opt.games == nil {
 		return nil, errors.New("practice requires chess")
@@ -582,6 +606,15 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 			return nil, err
 		}
 		mux.Handle("/family/games", gameRoutes)
+		if familyOptions.FamilyGames != nil {
+			playRoutes, err := familyweb.NewPlayPages(auth, opt.games, store, looks)
+			if err != nil {
+				return nil, err
+			}
+			mux.Handle("/family/play/", playRoutes)
+			mux.Handle("/family/chess.js", playRoutes)
+			mux.Handle("/family/chess-utils.js", playRoutes)
+		}
 	}
 	if opt.contacts != nil {
 		var contactStore familyweb.ContactStore = opt.contacts
@@ -639,6 +672,9 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		}
 		if opt.practice != nil {
 			childOptions.Practice = opt.practice
+		}
+		if opt.ratings != nil {
+			childOptions.Ratings = opt.ratings
 		}
 		if opt.reports != nil {
 			childOptions.Reports = opt.reports
@@ -700,6 +736,7 @@ func main() {
 	sessionsPath := flag.String("guardian-sessions", os.Getenv("YAPUNO_GUARDIAN_SESSIONS_FILE"), "optional private file; lets guardians stay signed in on a device for 30 days, also across restarts")
 	signupPath := flag.String("signup", os.Getenv("YAPUNO_SIGNUP_FILE"), "optional private invitation file; switches invited self-registration on (guardianship is then self-declared)")
 	playPath := flag.String("play", os.Getenv("YAPUNO_PLAY_FILE"), "optional private file for the games guardians allow per child; requires the games log")
+	ratingsPath := flag.String("ratings", os.Getenv("YAPUNO_RATINGS_FILE"), "optional private file for each child's private chess rating; requires the games log")
 	practicePath := flag.String("practice", os.Getenv("YAPUNO_PRACTICE_FILE"), "optional private file for practice games against the computer; requires the games log")
 	gamesPath := flag.String("games", os.Getenv("YAPUNO_GAMES_FILE"), "optional private log of chess games between approved contacts; requires the play file, pairing and contacts")
 	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
@@ -819,6 +856,15 @@ func main() {
 		}
 		defer gameStore.Close()
 	}
+	var ratingStore *rating.Store
+	if *ratingsPath != "" {
+		if gameStore == nil {
+			log.Fatal("YAPUNO_RATINGS_FILE requires YAPUNO_PLAY_FILE and YAPUNO_GAMES_FILE")
+		}
+		if ratingStore, err = rating.Open(*ratingsPath, time.Now); err != nil {
+			log.Fatal("ratings file unavailable, insecure or corrupt")
+		}
+	}
 	var practiceStore *practice.Store
 	if *practicePath != "" {
 		if gameStore == nil {
@@ -846,7 +892,7 @@ func main() {
 			log.Fatal("guardian session file unavailable, insecure or corrupt")
 		}
 	}
-	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore, guardianChat: guardianChatStore, guardianNames: guardianNameStore, play: playSettings, games: gameStore, practice: practiceStore})
+	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore, guardianChat: guardianChatStore, guardianNames: guardianNameStore, play: playSettings, games: gameStore, practice: practiceStore, ratings: ratingStore})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}
