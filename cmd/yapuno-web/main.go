@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pblumer/yapuno/internal/appearance"
+	"github.com/pblumer/yapuno/internal/authz"
 	"github.com/pblumer/yapuno/internal/childsession"
 	"github.com/pblumer/yapuno/internal/childweb"
 	"github.com/pblumer/yapuno/internal/contacts"
@@ -43,6 +44,7 @@ import (
 	"github.com/pblumer/yapuno/internal/rating"
 	"github.com/pblumer/yapuno/internal/reports"
 	"github.com/pblumer/yapuno/internal/signup"
+	"github.com/pblumer/yapuno/internal/webpush"
 )
 
 // version is set at build time (-ldflags "-X main.version=..."). It is shown
@@ -100,6 +102,12 @@ type optionalStores struct {
 	practice *practice.Store
 	// ratings keeps each child's private chess rating; it needs games.
 	ratings *rating.Store
+	// pushKey and push switch content-free notifications to children's
+	// devices on; both or neither. See docs/adr/draft-web-push.md.
+	pushKey *webpush.Key
+	push    *webpush.Store
+	// pushClient sends the pushes; nil means webpush.NewClient.
+	pushClient webpush.Doer
 	// now is the clock for report notices and reminders; nil means time.Now.
 	now func() time.Time
 }
@@ -120,6 +128,7 @@ func (o optionalStores) inactive() []string {
 		{o.appearance == nil, "Mein Look"},
 		{o.guardianLocks == nil, "Notfallsperre"},
 		{o.guardianNames == nil, "Namen für Eltern"},
+		{o.push == nil, "Benachrichtigungen"},
 		{o.signup == nil, "Registrierung per Einladung"},
 		{o.games == nil, "Schach"},
 	} {
@@ -225,6 +234,64 @@ type app struct {
 	handler http.Handler
 	// reminder is nil unless guardians are e-mailed about reports.
 	reminder *reports.Reminder
+	// notifier is nil unless children's devices are sent notifications.
+	notifier *webpush.Notifier
+}
+
+// notifyingMessages tells the other child's devices once a message between
+// two children is stored. A retry of a stored message tells nobody.
+type notifyingMessages struct {
+	*messages.Store
+	contacts *contacts.Store
+	notify   func(tenantID, childID, conversationID string)
+}
+
+func (m notifyingMessages) Send(p messages.Principal, id, clientID, body string) (messages.Message, bool, error) {
+	msg, duplicate, err := m.Store.Send(p, id, clientID, body)
+	if err == nil && !duplicate {
+		if peer, _, ok := m.contacts.Grant(id, p.Party); ok {
+			m.notify(peer.TenantID, peer.ChildID, id)
+		}
+	}
+	return msg, duplicate, err
+}
+
+// notifyingGuardianChat tells a child's devices once one of the child's own
+// guardians wrote to it. Messages between adults and messages a child writes
+// to a guardian tell nobody: guardians have no device binding yet.
+type notifyingGuardianChat struct {
+	*guardianchat.Store
+	notify func(tenantID, childID, conversationID string)
+}
+
+func (c notifyingGuardianChat) Send(a guardianchat.Actor, id, clientID, body string) (guardianchat.Message, bool, error) {
+	msg, duplicate, err := c.Store.Send(a, id, clientID, body)
+	if err != nil || duplicate || a.Participant.Kind != authz.ParticipantAdult {
+		return msg, duplicate, err
+	}
+	for _, t := range c.Store.Threads(a) {
+		if t.ID == id && t.Kind == guardianchat.Family && t.Peer.Kind == authz.ParticipantChild {
+			c.notify(t.Peer.TenantID, t.Peer.ID, id)
+		}
+	}
+	return msg, duplicate, err
+}
+
+// newNotifier builds the push notifier. A device is told only if its child
+// may read the conversation now, by the rules of the store that owns it.
+func newNotifier(opt optionalStores, now func() time.Time) (*webpush.Notifier, error) {
+	may := func(d webpush.Device, conversationID string) bool {
+		p := messages.Principal{Party: contacts.Party{TenantID: d.TenantID, ChildID: d.ChildID}, DeviceID: d.DeviceID}
+		if opt.guardianChat != nil && opt.guardianChat.ForChildren().Has(p, conversationID) {
+			return true
+		}
+		return opt.messages != nil && opt.messages.CanRead(p, conversationID)
+	}
+	client := opt.pushClient
+	if client == nil {
+		client = webpush.NewClient()
+	}
+	return webpush.NewNotifier(opt.push, opt.pushKey, may, client, now)
 }
 
 // runner is one pass of periodic work.
@@ -349,6 +416,9 @@ func newEraser(families *familystore.Store, directory *guardiandirectory.Directo
 	if opt.pairing != nil {
 		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "devices", Store: opt.pairing})
 	}
+	if opt.push != nil {
+		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "push subscriptions", Store: opt.push})
+	}
 	if opt.contacts != nil {
 		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "contacts", Store: opt.contacts})
 	}
@@ -406,6 +476,19 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 	}
 	if opt.guardianNames != nil && opt.guardianChat == nil {
 		return nil, errors.New("guardian names require the guardian chat")
+	}
+	if (opt.pushKey == nil) != (opt.push == nil) {
+		return nil, errors.New("notifications require both the push key and the subscription file")
+	}
+	var notifier *webpush.Notifier
+	if opt.push != nil {
+		if opt.pairing == nil || (opt.messages == nil && opt.guardianChat == nil) {
+			return nil, errors.New("notifications require device pairing and a chat")
+		}
+		var err error
+		if notifier, err = newNotifier(opt, now); err != nil {
+			return nil, err
+		}
 	}
 	var locker *guardianlock.Locker
 	if opt.guardianLocks != nil {
@@ -585,7 +668,11 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 			}
 			mux.Handle("/family/name", nameRoutes)
 		}
-		chatRoutes, err := familyweb.NewChatPagesWithNames(auth, opt.guardianChat, store, chosenNames, looks)
+		var guardianChat familyweb.GuardianChat = opt.guardianChat
+		if notifier != nil {
+			guardianChat = notifyingGuardianChat{Store: opt.guardianChat, notify: notifier.Notify}
+		}
+		chatRoutes, err := familyweb.NewChatPagesWithNames(auth, guardianChat, store, chosenNames, looks)
 		if err != nil {
 			return nil, err
 		}
@@ -666,6 +753,12 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		}
 		if opt.messages != nil {
 			childOptions.Messages = opt.messages
+			if notifier != nil {
+				childOptions.Messages = notifyingMessages{Store: opt.messages, contacts: opt.contacts, notify: notifier.Notify}
+			}
+		}
+		if notifier != nil {
+			childOptions.Push = childweb.Push{Key: opt.pushKey, Subscriptions: opt.push}
 		}
 		if opt.games != nil {
 			childOptions.Games = opt.games
@@ -718,7 +811,7 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		}
 		mux.ServeHTTP(w, r)
 	})
-	return &app{handler: handler, reminder: reminder}, nil
+	return &app{handler: handler, reminder: reminder, notifier: notifier}, nil
 }
 
 func main() {
@@ -740,6 +833,8 @@ func main() {
 	practicePath := flag.String("practice", os.Getenv("YAPUNO_PRACTICE_FILE"), "optional private file for practice games against the computer; requires the games log")
 	gamesPath := flag.String("games", os.Getenv("YAPUNO_GAMES_FILE"), "optional private log of chess games between approved contacts; requires the play file, pairing and contacts")
 	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
+	pushKeyPath := flag.String("push-key", os.Getenv("YAPUNO_PUSH_KEY_FILE"), "optional private VAPID key (0600, create with yapuno-pushkey); requires -push-subscriptions")
+	pushPath := flag.String("push-subscriptions", os.Getenv("YAPUNO_PUSH_SUBSCRIPTIONS_FILE"), "optional private file of children's push subscriptions; requires -push-key, pairing and a chat")
 	flag.Parse()
 	host, _, err := net.SplitHostPort(*listen)
 	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
@@ -874,6 +969,19 @@ func main() {
 			log.Fatal("practice file unavailable, insecure or corrupt")
 		}
 	}
+	var pushKey *webpush.Key
+	var pushStore *webpush.Store
+	if *pushKeyPath != "" || *pushPath != "" {
+		if *pushKeyPath == "" || *pushPath == "" || pairingStore == nil {
+			log.Fatal("YAPUNO_PUSH_KEY_FILE and YAPUNO_PUSH_SUBSCRIPTIONS_FILE go together and require YAPUNO_PAIRING_FILE")
+		}
+		if pushKey, err = webpush.LoadKey(*pushKeyPath, *origin); err != nil {
+			log.Fatal("push key unavailable or not private (0600), or the origin is not an HTTPS origin")
+		}
+		if pushStore, err = webpush.Open(*pushPath, pairingStore); err != nil {
+			log.Fatal("push subscription store unavailable, insecure or corrupt")
+		}
+	}
 	smtpPort := 465
 	sender, err := guardianmailer.New(guardianmailer.Config{
 		Host: os.Getenv("YAPUNO_SMTP_HOST"), Port: smtpPort,
@@ -892,7 +1000,7 @@ func main() {
 			log.Fatal("guardian session file unavailable, insecure or corrupt")
 		}
 	}
-	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore, guardianChat: guardianChatStore, guardianNames: guardianNameStore, play: playSettings, games: gameStore, practice: practiceStore, ratings: ratingStore})
+	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore, guardianChat: guardianChatStore, guardianNames: guardianNameStore, play: playSettings, games: gameStore, practice: practiceStore, ratings: ratingStore, pushKey: pushKey, push: pushStore})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}
@@ -905,6 +1013,9 @@ func main() {
 	defer stop()
 	if application.reminder != nil {
 		go remindEvery(ctx, application.reminder, reminderInterval)
+	}
+	if application.notifier != nil {
+		go application.notifier.Run(ctx)
 	}
 	go func() {
 		<-ctx.Done()

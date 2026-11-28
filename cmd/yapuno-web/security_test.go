@@ -31,6 +31,7 @@ import (
 	"github.com/pblumer/yapuno/internal/rating"
 	"github.com/pblumer/yapuno/internal/reports"
 	"github.com/pblumer/yapuno/internal/signup"
+	"github.com/pblumer/yapuno/internal/webpush"
 )
 
 // noticeMailer records sign-in links and lock notices per address.
@@ -181,6 +182,12 @@ type securityServer struct {
 	settings *play.Settings
 	games    *games.Store
 	ratings  *rating.Store
+	// withPush switches content-free notifications on; pushes go to
+	// pushClient instead of the network.
+	withPush   bool
+	push       *webpush.Store
+	pushClient *pushRecorder
+	notifier   *webpush.Notifier
 }
 
 const threeGuardians = `{"guardians":[{"email":"anna@example.org","guardian_id":"guardian-a","tenant_id":"tenant-a","active":true},{"email":"ben@example.org","guardian_id":"guardian-a2","tenant_id":"tenant-a","active":true},{"email":"bea-parent@example.org","guardian_id":"guardian-b","tenant_id":"tenant-b","active":true}]}`
@@ -309,11 +316,14 @@ func (s *securityServer) start(withLocks bool) {
 		}
 		s.sessions = sessions
 	}
-	handler, err := newHandler("https://app.example.org", s.families, s.guardians, s.mailer, s.sessions, opt)
+	if s.withPush {
+		s.openPush(&opt)
+	}
+	a, err := newApp("https://app.example.org", s.families, s.guardians, s.mailer, s.sessions, opt)
 	if err != nil {
 		s.t.Fatal(err)
 	}
-	s.handler = handler
+	s.handler, s.notifier = a.handler, a.notifier
 }
 
 func (s *securityServer) do(method, path string, cookie *http.Cookie, form url.Values) *httptest.ResponseRecorder {

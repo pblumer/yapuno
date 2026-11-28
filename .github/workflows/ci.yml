@@ -34,8 +34,11 @@ jobs:
           node --check internal/chatpage/chat-utils.js
           node --check internal/chesspage/chess.js
           node --check internal/chesspage/chess-utils.js
+          node --check internal/childweb/push.js
+          node --check internal/childweb/push-utils.js
+          node --check internal/childweb/sw.js
       - name: Browser script unit tests
-        run: node --test internal/childweb/sig_utils.test.cjs internal/chatpage/chat_utils.test.cjs internal/chesspage/chess_utils.test.cjs
+        run: node --test internal/childweb/sig_utils.test.cjs internal/chatpage/chat_utils.test.cjs internal/chesspage/chess_utils.test.cjs internal/childweb/push_utils.test.cjs
       - name: Build
         run: go build ./...
       - name: Vet
