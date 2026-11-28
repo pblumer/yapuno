@@ -15,6 +15,7 @@ import (
 	"github.com/pblumer/yapuno/internal/devicepairing/pairingtest"
 	"github.com/pblumer/yapuno/internal/games"
 	"github.com/pblumer/yapuno/internal/play"
+	"github.com/pblumer/yapuno/internal/practice"
 )
 
 type playWorld struct {
@@ -58,6 +59,13 @@ func newPlayWorld(t *testing.T) *playWorld {
 		t.Fatal(err)
 	}
 	if w.handler, err = New(w.sessions, w.families, Options{Contacts: w.contacts, Looks: w.looks, Games: store}); err != nil {
+		t.Fatal(err)
+	}
+	practiceStore, err := practice.Open(filepath.Join(dir, "practice.json"), w.pairing, w.families, settings, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.handler, err = New(w.sessions, w.families, Options{Contacts: w.contacts, Looks: w.looks, Games: store, Practice: practiceStore}); err != nil {
 		t.Fatal(err)
 	}
 	pw := &playWorld{world: w, settings: settings, store: store}
@@ -131,10 +139,14 @@ type side struct {
 
 // begin lets Alex invite Bea and Bea accept. The server chooses colours at
 // random; it returns the game id and who plays white and black.
-func (pw *playWorld) begin(t *testing.T, mode string) (string, side, side) {
+func (pw *playWorld) begin(t *testing.T, mode string, extra ...string) (string, side, side) {
 	t.Helper()
 	f := pw.form(t, pw.alex, pw.ab)
-	if rec := pw.post(pw.alex, "/child/play/"+pw.ab+"/invite", url.Values{"csrf_token": {f.csrf}, "client_id": {f.client}, "mode": {mode}}); rec.Code != http.StatusSeeOther {
+	values := url.Values{"csrf_token": {f.csrf}, "client_id": {f.client}, "mode": {mode}}
+	for i := 0; i+1 < len(extra); i += 2 {
+		values.Add(extra[i], extra[i+1])
+	}
+	if rec := pw.post(pw.alex, "/child/play/"+pw.ab+"/invite", values); rec.Code != http.StatusSeeOther {
 		t.Fatalf("invite: %d %s", rec.Code, rec.Body.String())
 	}
 	f = pw.form(t, pw.bea, pw.ab)
@@ -291,5 +303,118 @@ func TestPlayRoutesRefuse(t *testing.T) {
 	}
 	if got := act(pw.alex, pw.ab, good()); got != http.StatusForbidden {
 		t.Errorf("act after disabling: %d", got)
+	}
+}
+
+func TestTipsThroughForms(t *testing.T) {
+	pw := newPlayWorld(t)
+	f := pw.form(t, pw.alex, pw.ab)
+	if rec := pw.post(pw.alex, "/child/play/"+pw.ab+"/invite", url.Values{"csrf_token": {f.csrf}, "client_id": {f.client}, "mode": {"correspondence"}, "tips": {"maybe"}}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad tips value: %d", rec.Code)
+	}
+	game, white, black := pw.begin(t, "correspondence", "tips", "yes")
+	act := func(cookie *http.Cookie, v url.Values) *httptest.ResponseRecorder {
+		f := pw.form(t, cookie, pw.ab)
+		v.Set("csrf_token", f.csrf)
+		v.Set("client_id", f.client)
+		v.Set("game", game)
+		return pw.post(cookie, "/child/play/"+pw.ab+"/act", v)
+	}
+	for name, v := range map[string]url.Values{
+		"hint without level": {"kind": {"hint"}, "ply": {"0"}},
+		"move with level":    {"kind": {"move"}, "move": {"e2e4"}, "ply": {"0"}, "level": {"1"}},
+		"resign with ply":    {"kind": {"resign"}, "ply": {"0"}},
+		"negative level":     {"kind": {"hint"}, "ply": {"0"}, "level": {"-1"}},
+	} {
+		if rec := act(white.cookie, v); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d", name, rec.Code)
+		}
+	}
+	if !strings.Contains(pw.get("/child/play/"+pw.ab, white.cookie).Body.String(), `name="level" value="1"`) {
+		t.Fatal("no tip button")
+	}
+	if rec := act(white.cookie, url.Values{"kind": {"hint"}, "level": {"1"}, "ply": {"0"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("tip: %d %s", rec.Code, rec.Body.String())
+	}
+	body := pw.get("/child/play/"+pw.ab, white.cookie).Body.String()
+	if !strings.Contains(body, "Bring deine Springer und Läufer ins Spiel") || !strings.Contains(body, "Tipps: noch 2 von 3.") {
+		t.Fatalf("tip not shown: %s", body)
+	}
+	if rec := act(white.cookie, url.Values{"kind": {"hint"}, "level": {"2"}, "ply": {"0"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("tip level 2: %d", rec.Code)
+	}
+	if body := pw.get("/child/play/"+pw.ab, white.cookie).Body.String(); !strings.Contains(body, "Ein guter Zug wäre:") {
+		t.Fatal("move tip not shown")
+	}
+	other := pw.get("/child/play/"+pw.ab, black.cookie).Body.String()
+	if strings.Contains(other, "Ein guter Zug") || !strings.Contains(other, white.name+" hat 1 genutzt.") {
+		t.Fatal("opponent view of tips")
+	}
+}
+
+func TestPracticeRoutes(t *testing.T) {
+	pw := newPlayWorld(t)
+	if !strings.Contains(pw.get("/child", pw.alex).Body.String(), `href="/child/practice"`) {
+		t.Fatal("no practice link")
+	}
+	page := pw.get("/child/practice", pw.alex)
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Üben gegen den Computer") {
+		t.Fatalf("practice page: %d", page.Code)
+	}
+	f := pw.form(t, pw.alex, pw.ab) // any page carries the session's CSRF token
+	post := func(path string, v url.Values) *httptest.ResponseRecorder {
+		v.Set("csrf_token", f.csrf)
+		v.Set("client_id", f.client)
+		return pw.post(pw.alex, path, v)
+	}
+	if rec := post("/child/practice/start", url.Values{"level": {"medium"}, "color": {"white"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("start: %d", rec.Code)
+	}
+	if rec := post("/child/practice/act", url.Values{"kind": {"move"}, "move": {"e2e4"}, "ply": {"0"}, "game": {""}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("move: %d %s", rec.Code, rec.Body.String())
+	}
+	body := pw.get("/child/practice", pw.alex).Body.String()
+	if !strings.Contains(body, "Der Computer: ") || !strings.Contains(body, `value="takeback"`) || !strings.Contains(body, `data-poll="0"`) {
+		t.Fatalf("after move: %s", body)
+	}
+	if rec := post("/child/practice/act", url.Values{"kind": {"move"}, "move": {"e2e5"}, "ply": {"2"}}); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("illegal: %d", rec.Code)
+	}
+	if rec := post("/child/practice/act", url.Values{"kind": {"hint"}, "level": {"1"}, "ply": {"2"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("hint: %d", rec.Code)
+	}
+	if rec := post("/child/practice/act", url.Values{"kind": {"takeback"}, "ply": {"2"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("takeback: %d", rec.Code)
+	}
+	for name, v := range map[string]url.Values{
+		"game field":   {"kind": {"resign"}, "game": {strings.Repeat("a", 32)}},
+		"unknown kind": {"kind": {"offer_draw"}},
+	} {
+		if rec := post("/child/practice/act", v); rec.Code != http.StatusBadRequest && rec.Code != http.StatusConflict {
+			t.Errorf("%s: %d", name, rec.Code)
+		}
+	}
+	if rec := post("/child/practice/start", url.Values{"level": {"godlike"}, "color": {"white"}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown level: %d", rec.Code)
+	}
+	bad := url.Values{"csrf_token": {"x"}, "client_id": {f.client}, "kind": {"resign"}}
+	if rec := pw.post(pw.alex, "/child/practice/act", bad); rec.Code != http.StatusForbidden {
+		t.Errorf("wrong CSRF: %d", rec.Code)
+	}
+	if rec := pw.post(nil, "/child/practice/act", url.Values{"kind": {"resign"}}); rec.Code != http.StatusUnauthorized {
+		t.Errorf("signed out: %d", rec.Code)
+	}
+	// Switching chess off stops practice too.
+	if err := pw.settings.SetEnabled("guardian-a", "tenant-a", "child-a", play.GameChess, false); err != nil {
+		t.Fatal(err)
+	}
+	if rec := pw.get("/child/practice", pw.alex); rec.Code != http.StatusSeeOther {
+		t.Errorf("page after disabling: %d", rec.Code)
+	}
+	if rec := post("/child/practice/act", url.Values{"kind": {"resign"}}); rec.Code != http.StatusForbidden {
+		t.Errorf("act after disabling: %d", rec.Code)
+	}
+	if strings.Contains(pw.get("/child", pw.alex).Body.String(), "/child/practice") {
+		t.Error("link after disabling")
 	}
 }

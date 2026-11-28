@@ -143,6 +143,12 @@ func (h *handler) playForm(w http.ResponseWriter, r *http.Request, fields ...str
 		http.NotFound(w, r)
 		return childsession.Session{}, nil, false
 	}
+	return h.childForm(w, r, fields...)
+}
+
+// childForm is playForm without a contact in the path.
+func (h *handler) childForm(w http.ResponseWriter, r *http.Request, fields ...string) (childsession.Session, url.Values, bool) {
+	headers(w, false)
 	s, err := h.sessions.Authenticate(r)
 	if err != nil {
 		http.Error(w, "Authentication required", http.StatusUnauthorized)
@@ -172,6 +178,40 @@ func (h *handler) playForm(w http.ResponseWriter, r *http.Request, fields ...str
 	return s, r.PostForm, true
 }
 
+// actionFields says which fields beyond the kind each action carries.
+var actionFields = map[games.ActionKind][]string{
+	games.Move: {"move", "ply"},
+	games.Hint: {"level", "ply"},
+	"takeback": {"ply"},
+}
+
+// actionFrom reads an action from a form: every field the kind needs
+// exactly once, no field it does not need.
+func actionFrom(form url.Values) (games.Action, bool) {
+	a := games.Action{Kind: games.ActionKind(form.Get("kind")), ClientID: form.Get("client_id")}
+	need := map[string]bool{}
+	for _, f := range actionFields[a.Kind] {
+		need[f] = true
+	}
+	for _, f := range []string{"move", "ply", "level"} {
+		if n := len(form[f]); need[f] && n != 1 || !need[f] && n != 0 {
+			return games.Action{}, false
+		}
+	}
+	number := func(f string) (int, bool) {
+		if !need[f] {
+			return 0, true
+		}
+		n, err := strconv.Atoi(form.Get(f))
+		return n, err == nil && n >= 0 && n < 10000
+	}
+	var ok1, ok2 bool
+	a.Move = form.Get("move")
+	a.Ply, ok1 = number("ply")
+	a.Level, ok2 = number("level")
+	return a, ok1 && ok2
+}
+
 // explainPlay maps a store error to a status and a German message.
 func explainPlay(err error, kind games.ActionKind) (int, string) {
 	switch {
@@ -187,6 +227,10 @@ func explainPlay(err error, kind games.ActionKind) (int, string) {
 		return http.StatusConflict, "Ihr habt schon eine Partie. Spielt zuerst diese fertig."
 	case errors.Is(err, games.ErrRateLimited) && kind == games.OfferDraw:
 		return http.StatusTooManyRequests, "Du hast in dieser Partie schon oft Remis angeboten."
+	case errors.Is(err, games.ErrRateLimited) && kind == games.Hint:
+		return http.StatusTooManyRequests, "Deine Tipps für diese Partie sind aufgebraucht."
+	case errors.Is(err, games.ErrRateLimited) && kind == "practice":
+		return http.StatusTooManyRequests, "Das war sehr schnell. Warte einen Moment und versuch es nochmals."
 	case errors.Is(err, games.ErrRateLimited):
 		return http.StatusTooManyRequests, "Du hast heute schon viele Einladungen geschickt. Versuch es morgen wieder."
 	case errors.Is(err, games.ErrConflict):
@@ -231,19 +275,8 @@ func (h *handler) playAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, gameID := r.PathValue("id"), form.Get("game")
-	a := games.Action{Kind: games.ActionKind(form.Get("kind")), ClientID: form.Get("client_id")}
-	if a.Kind == games.Move {
-		if len(form["move"]) != 1 || len(form["ply"]) != 1 {
-			http.Error(w, "Invalid form", http.StatusBadRequest)
-			return
-		}
-		ply, err := strconv.Atoi(form.Get("ply"))
-		if err != nil || ply < 0 {
-			http.Error(w, "Invalid form", http.StatusBadRequest)
-			return
-		}
-		a.Move, a.Ply = form.Get("move"), ply
-	} else if len(form["move"]) != 0 || len(form["ply"]) != 0 {
+	a, ok := actionFrom(form)
+	if !ok {
 		http.Error(w, "Invalid form", http.StatusBadRequest)
 		return
 	}

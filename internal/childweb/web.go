@@ -86,6 +86,8 @@ type Options struct {
 	// Games enables chess with contacts. It requires Contacts, which names
 	// the other child.
 	Games Games
+	// Practice enables chess against the computer.
+	Practice Practice
 }
 
 // FamilyThread is the conversation of the authenticated child with one of
@@ -150,6 +152,9 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 	}
 	if opt.Games != nil {
 		h.mountPlay(mux)
+	}
+	if opt.Practice != nil {
+		h.mountPractice(mux)
 	}
 	// Blocking and reporting exist for contacts between children only.
 	if opt.Messages != nil && opt.Contacts != nil {
@@ -338,6 +343,7 @@ var homePage = template.Must(template.New("child-home").Parse(`<!doctype html><h
 <h2>Deine Crew</h2>
 {{if .Crew}}<ul class="yp-crew">{{range .Crew}}<li>{{if .Chat}}<a href="/child/chat/{{.Chat}}">{{template "face" .}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a>{{else}}{{template "face" .}}<span>{{.Name}}</span>{{end}}{{if .Play}}<a class="yp-play-link" href="/child/play/{{.Play}}" aria-label="Schach mit {{.Name}}{{if .PlayNote}}: {{.PlayNote}}{{end}}"><span aria-hidden="true">♞&#xFE0E;</span>{{if .PlayNote}}<small aria-hidden="true">{{.PlayNote}}</small>{{end}}</a>{{end}}</li>{{end}}</ul>{{else}}<p class="yp-empty">Noch niemand in deiner Crew. Deine Eltern können dich mit anderen Kindern verbinden.</p>{{end}}
 <p class="yp-muted">In deiner Crew sind nur Kinder, denen beide Familien zugestimmt haben. Fremde können dich nicht finden.</p>
+{{if .Practice}}<h2>Üben</h2><ul class="yp-crew"><li><a href="/child/practice"><span class="yp-initial" aria-hidden="true">♞&#xFE0E;</span><span>Schach gegen den Computer</span><span class="yp-go" aria-hidden="true">›</span></a></li></ul>{{end}}
 {{if .Blocked}}<h2>Blockiert</h2><ul class="yp-crew">{{range .Blocked}}<li><span class="yp-initial" aria-hidden="true">{{.Initial}}</span><span>{{.Name}}</span></li>{{end}}</ul><p class="yp-muted">Ihr könnt euch nicht schreiben. Nur deine Eltern können eine Blockierung aufheben.</p>{{end}}
 <p class="yp-note">{{if .Chats}}Tippe auf einen Namen, um zu schreiben. Das hier ist eine Vorschau.{{else}}Nachrichten schreiben kommt bald. Das hier ist eine Vorschau.{{end}}</p>
 {{if .LookHref}}<p><a class="yp-link" href="{{.LookHref}}">Mein Look ändern</a></p>{{end}}
@@ -413,8 +419,10 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 		Parents          []crewMember
 		Chats            bool
 		LookHref         string
+		Practice         bool
 	}{
-		Skin: def.ID, Name: name, CSRF: s.CSRFToken, Notice: fixedNotice(r, homeNotices), Blocked: blocked,
+		Practice: h.mayPractice(s),
+		Skin:     def.ID, Name: name, CSRF: s.CSRFToken, Notice: fixedNotice(r, homeNotices), Blocked: blocked,
 		// Validated first-party skin tokens and fixed component rules only.
 		CSS:    template.CSS(fontassets.FaceCSS(def.Typography.Heading, def.Typography.Body) + ".yp-child{" + decls + "}\n" + homeCSS),
 		Figure: figure, Crew: crew, Parents: h.parents(s), Chats: h.opt.Messages != nil, LookHref: lookHref,
