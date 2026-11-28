@@ -59,6 +59,8 @@ var gamePage = template.Must(template.New("games").Parse(`<!doctype html><html l
 <li>Eine Partie ist nur möglich, wenn auch die Eltern des anderen Kindes Schach erlaubt haben.</li>
 <li>Gespielt wird als Fernschach (jeder zieht, wann es passt) oder live mit Schachuhr.</li>
 <li>Im Spiel gibt es keinen Chat und keine Texte, nur Züge, Remis-Angebote und Aufgeben.</li>
+<li>Wer einlädt, kann «Mit Tipps» wählen: Dann darf jedes Kind drei Tipps pro Partie nehmen, und beide sehen, wer wie viele genutzt hat.</li>
+<li>Ist Schach erlaubt, kann {{.Name}} auch allein gegen den Computer üben, mit Tipps und Zug zurücknehmen, wo die Installation das anbietet.</li>
 <li>Schaltest du Schach aus, kann {{.Name}} ab sofort weder neue Partien beginnen noch laufende ansehen oder weiterspielen. Schreiben bleibt davon unberührt.</li>
 <li>Ein Zeitlimit für das Spielen gibt es noch nicht.</li>
 </ul></section>

@@ -24,6 +24,7 @@ import (
 	"github.com/pblumer/yapuno/internal/guardiandirectory"
 	"github.com/pblumer/yapuno/internal/guardiansession"
 	"github.com/pblumer/yapuno/internal/play"
+	"github.com/pblumer/yapuno/internal/practice"
 )
 
 func TestChessEndToEndWithGuardianSwitchAndPurge(t *testing.T) {
@@ -71,7 +72,14 @@ func TestChessEndToEndWithGuardianSwitchAndPurge(t *testing.T) {
 	if _, err := newHandler("https://app.example.org", families, guardians, &fakeMailer{}, sessions, optionalStores{pairing: pairing, contacts: contactStore, games: gameStore}); err == nil {
 		t.Fatal("chess without game settings accepted")
 	}
-	handler, err := newHandler("https://app.example.org", families, guardians, &fakeMailer{}, sessions, optionalStores{pairing: pairing, contacts: contactStore, play: settings, games: gameStore})
+	practiceStore, err := practice.Open(filepath.Join(root, "practice.json"), pairing, families, settings, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newHandler("https://app.example.org", families, guardians, &fakeMailer{}, sessions, optionalStores{pairing: pairing, contacts: contactStore, play: settings, practice: practiceStore}); err == nil {
+		t.Fatal("practice without chess accepted")
+	}
+	handler, err := newHandler("https://app.example.org", families, guardians, &fakeMailer{}, sessions, optionalStores{pairing: pairing, contacts: contactStore, play: settings, games: gameStore, practice: practiceStore})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,6 +202,17 @@ func TestChessEndToEndWithGuardianSwitchAndPurge(t *testing.T) {
 	white := alex
 	if !strings.Contains(do(http.MethodGet, "/child/play/"+link, alex, nil, nil).Body.String(), "Du bist am Zug.") {
 		white = bea
+	}
+	// Practice against the computer is there for each child, too.
+	p := formOf(alex)
+	p.Set("level", "easy")
+	p.Set("color", "white")
+	p.Del("game")
+	if w := do(http.MethodPost, "/child/practice/start", alex, p, nil); w.Code != http.StatusSeeOther {
+		t.Fatalf("practice start: %d %s", w.Code, w.Body.String())
+	}
+	if body := do(http.MethodGet, "/child/practice", alex, nil, nil).Body.String(); !strings.Contains(body, "Du bist am Zug.") {
+		t.Fatal("practice page")
 	}
 	f = formOf(white)
 	f.Set("kind", "move")

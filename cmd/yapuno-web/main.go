@@ -39,6 +39,7 @@ import (
 	"github.com/pblumer/yapuno/internal/messages"
 	"github.com/pblumer/yapuno/internal/pairingweb"
 	"github.com/pblumer/yapuno/internal/play"
+	"github.com/pblumer/yapuno/internal/practice"
 	"github.com/pblumer/yapuno/internal/reports"
 	"github.com/pblumer/yapuno/internal/signup"
 )
@@ -94,6 +95,8 @@ type optionalStores struct {
 	// contacts.
 	play  *play.Settings
 	games *games.Store
+	// practice stores games against the computer; it needs games.
+	practice *practice.Store
 	// now is the clock for report notices and reminders; nil means time.Now.
 	now func() time.Time
 }
@@ -365,6 +368,9 @@ func newEraser(families *familystore.Store, directory *guardiandirectory.Directo
 	if opt.play != nil {
 		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "game settings", Store: opt.play})
 	}
+	if opt.practice != nil {
+		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "practice games", Store: opt.practice})
+	}
 	if opt.messages != nil {
 		cfg.Logs = append(cfg.Logs, erasure.Log{Name: "the children's chat", Log: opt.messages})
 	}
@@ -463,6 +469,9 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 			return nil, errors.New("chess requires game settings, contacts and device pairing")
 		}
 		familyOptions.GamePages = true
+	}
+	if opt.practice != nil && opt.games == nil {
+		return nil, errors.New("practice requires chess")
 	}
 	family, err := familyweb.NewWithOptions(auth, store, familyOptions)
 	if err != nil {
@@ -628,6 +637,9 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		if opt.games != nil {
 			childOptions.Games = opt.games
 		}
+		if opt.practice != nil {
+			childOptions.Practice = opt.practice
+		}
 		if opt.reports != nil {
 			childOptions.Reports = opt.reports
 			// Guardians are e-mailed about a new report when the mailer can
@@ -688,6 +700,7 @@ func main() {
 	sessionsPath := flag.String("guardian-sessions", os.Getenv("YAPUNO_GUARDIAN_SESSIONS_FILE"), "optional private file; lets guardians stay signed in on a device for 30 days, also across restarts")
 	signupPath := flag.String("signup", os.Getenv("YAPUNO_SIGNUP_FILE"), "optional private invitation file; switches invited self-registration on (guardianship is then self-declared)")
 	playPath := flag.String("play", os.Getenv("YAPUNO_PLAY_FILE"), "optional private file for the games guardians allow per child; requires the games log")
+	practicePath := flag.String("practice", os.Getenv("YAPUNO_PRACTICE_FILE"), "optional private file for practice games against the computer; requires the games log")
 	gamesPath := flag.String("games", os.Getenv("YAPUNO_GAMES_FILE"), "optional private log of chess games between approved contacts; requires the play file, pairing and contacts")
 	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
 	flag.Parse()
@@ -806,6 +819,15 @@ func main() {
 		}
 		defer gameStore.Close()
 	}
+	var practiceStore *practice.Store
+	if *practicePath != "" {
+		if gameStore == nil {
+			log.Fatal("YAPUNO_PRACTICE_FILE requires YAPUNO_PLAY_FILE and YAPUNO_GAMES_FILE")
+		}
+		if practiceStore, err = practice.Open(*practicePath, pairingStore, store, playSettings, time.Now); err != nil {
+			log.Fatal("practice file unavailable, insecure or corrupt")
+		}
+	}
 	smtpPort := 465
 	sender, err := guardianmailer.New(guardianmailer.Config{
 		Host: os.Getenv("YAPUNO_SMTP_HOST"), Port: smtpPort,
@@ -824,7 +846,7 @@ func main() {
 			log.Fatal("guardian session file unavailable, insecure or corrupt")
 		}
 	}
-	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore, guardianChat: guardianChatStore, guardianNames: guardianNameStore, play: playSettings, games: gameStore})
+	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore, guardianChat: guardianChatStore, guardianNames: guardianNameStore, play: playSettings, games: gameStore, practice: practiceStore})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}
