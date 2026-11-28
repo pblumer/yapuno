@@ -21,7 +21,7 @@ func view(t *testing.T, mode games.Mode, color chess.Color, moves ...string) *ga
 		}
 		played = append(played, m)
 	}
-	return &games.View{ID: strings.Repeat("a", 32), Contact: strings.Repeat("c", 32), Mode: mode, Phase: games.Running,
+	return &games.View{ID: strings.Repeat("a", 32), Scope: strings.Repeat("c", 32), Mode: mode, Phase: games.Running,
 		YourColor: color, Position: g.Position(), Moves: played, Version: uint64(2 + len(moves))}
 }
 

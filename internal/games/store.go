@@ -1191,6 +1191,7 @@ func (s *Store) latest(p actor, contactID string) (View, bool, error) {
 		if g.scope != contactID {
 			continue
 		}
+		s.rate(g, now)
 		end, _, _ := g.settle(now)
 		open := end == ""
 		if best == nil || (open && !bestOpen) || (open == bestOpen && (g.created.After(best.created) ||

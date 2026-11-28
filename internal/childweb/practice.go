@@ -97,7 +97,7 @@ func (h *handler) practiceAct(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid form", http.StatusBadRequest)
 		return
 	}
-	a, ok := actionFrom(form)
+	a, ok := chesspage.ActionFrom(form)
 	if !ok {
 		http.Error(w, "Invalid form", http.StatusBadRequest)
 		return
@@ -116,7 +116,7 @@ func (h *handler) practiceDone(w http.ResponseWriter, r *http.Request, s childse
 		if errors.Is(err, games.ErrRateLimited) {
 			kind = "practice"
 		}
-		status, alert := explainPlay(err, kind)
+		status, alert := chesspage.Explain(err, kind)
 		h.renderPractice(w, r, s, status, alert, move)
 	}
 }
