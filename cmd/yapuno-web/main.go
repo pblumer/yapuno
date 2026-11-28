@@ -28,6 +28,7 @@ import (
 	"github.com/pblumer/yapuno/internal/familystore"
 	"github.com/pblumer/yapuno/internal/familyweb"
 	"github.com/pblumer/yapuno/internal/fontassets"
+	"github.com/pblumer/yapuno/internal/games"
 	"github.com/pblumer/yapuno/internal/guardianchat"
 	"github.com/pblumer/yapuno/internal/guardiandirectory"
 	"github.com/pblumer/yapuno/internal/guardianlock"
@@ -38,6 +39,9 @@ import (
 	"github.com/pblumer/yapuno/internal/invitenotice"
 	"github.com/pblumer/yapuno/internal/messages"
 	"github.com/pblumer/yapuno/internal/pairingweb"
+	"github.com/pblumer/yapuno/internal/play"
+	"github.com/pblumer/yapuno/internal/practice"
+	"github.com/pblumer/yapuno/internal/rating"
 	"github.com/pblumer/yapuno/internal/reports"
 	"github.com/pblumer/yapuno/internal/signup"
 	"github.com/pblumer/yapuno/internal/webpush"
@@ -89,6 +93,15 @@ type optionalStores struct {
 	// one for guardians of connected families. It needs guardianChat, the
 	// only place where these names are shown.
 	guardianNames *guardiannames.Store
+	// play records which games guardians allow for each child; games stores
+	// chess games between approved contacts. games needs play, pairing and
+	// contacts.
+	play  *play.Settings
+	games *games.Store
+	// practice stores games against the computer; it needs games.
+	practice *practice.Store
+	// ratings keeps each child's private chess rating; it needs games.
+	ratings *rating.Store
 	// pushKey and push switch content-free notifications to children's
 	// devices on; both or neither. See docs/adr/draft-web-push.md.
 	pushKey *webpush.Key
@@ -117,6 +130,7 @@ func (o optionalStores) inactive() []string {
 		{o.guardianNames == nil, "Namen für Eltern"},
 		{o.push == nil, "Benachrichtigungen"},
 		{o.signup == nil, "Registrierung per Einladung"},
+		{o.games == nil, "Schach"},
 	} {
 		if f.off {
 			out = append(out, f.name)
@@ -315,6 +329,7 @@ type purgingContacts struct {
 	*contacts.Store
 	messages *messages.Store     // nil when the children's chat is off
 	guardian *guardianchat.Store // nil when the guardians' chat is off
+	games    *games.Store        // nil when chess is off
 }
 
 func (p purgingContacts) Remove(guardianID, tenantID, childID, linkID string) error {
@@ -324,6 +339,12 @@ func (p purgingContacts) Remove(guardianID, tenantID, childID, linkID string) er
 	if p.messages != nil {
 		if err := p.messages.Compact(); err != nil {
 			log.Printf("message purge after contact removal failed; it will be retried at the next compaction")
+		}
+	}
+	// The children's games end with the contact.
+	if p.games != nil {
+		if err := p.games.Compact(); err != nil {
+			log.Printf("game purge after contact removal failed; it will be retried at the next compaction")
 		}
 	}
 	// The conversation of the two families' guardians ends with the contact.
@@ -417,8 +438,20 @@ func newEraser(families *familystore.Store, directory *guardiandirectory.Directo
 	if opt.guardianLocks != nil {
 		cfg.After = append(cfg.After, erasure.TenantDependent{Name: "locks", Store: opt.guardianLocks})
 	}
+	if opt.play != nil {
+		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "game settings", Store: opt.play})
+	}
+	if opt.practice != nil {
+		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "practice games", Store: opt.practice})
+	}
+	if opt.ratings != nil {
+		cfg.Before = append(cfg.Before, erasure.Dependent{Name: "chess ratings", Store: opt.ratings})
+	}
 	if opt.messages != nil {
 		cfg.Logs = append(cfg.Logs, erasure.Log{Name: "the children's chat", Log: opt.messages})
+	}
+	if opt.games != nil {
+		cfg.Logs = append(cfg.Logs, erasure.Log{Name: "chess games", Log: opt.games})
 	}
 	if opt.guardianChat != nil {
 		cfg.Logs = append(cfg.Logs, erasure.Log{Name: "the guardians' chat", Log: opt.guardianChat})
@@ -519,6 +552,33 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		// Guardians who create families and profiles themselves can also
 		// delete them.
 		familyOptions.DeletePages = true
+	}
+	if opt.games != nil {
+		if opt.play == nil || opt.contacts == nil || opt.pairing == nil {
+			return nil, errors.New("chess requires game settings, contacts and device pairing")
+		}
+		familyOptions.GamePages = true
+		// Guardians play their own children where the guardians' chat,
+		// which shows a child its guardians, is on. The directory knows
+		// emergency locks.
+		if opt.guardianChat != nil {
+			if err := opt.games.EnableFamilies(store, directory); err != nil {
+				return nil, err
+			}
+			familyOptions.FamilyGames = opt.games
+		}
+	}
+	if opt.ratings != nil {
+		if opt.games == nil {
+			return nil, errors.New("ratings require chess")
+		}
+		opt.games.SetRater(opt.ratings)
+		if opt.practice != nil {
+			opt.practice.SetRater(opt.ratings)
+		}
+	}
+	if opt.practice != nil && opt.games == nil {
+		return nil, errors.New("practice requires chess")
 	}
 	family, err := familyweb.NewWithOptions(auth, store, familyOptions)
 	if err != nil {
@@ -627,10 +687,26 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		}
 		mux.Handle("/family/look", lookRoutes)
 	}
+	if opt.games != nil {
+		gameRoutes, err := familyweb.NewGamePages(auth, opt.play, store, looks)
+		if err != nil {
+			return nil, err
+		}
+		mux.Handle("/family/games", gameRoutes)
+		if familyOptions.FamilyGames != nil {
+			playRoutes, err := familyweb.NewPlayPages(auth, opt.games, store, looks)
+			if err != nil {
+				return nil, err
+			}
+			mux.Handle("/family/play/", playRoutes)
+			mux.Handle("/family/chess.js", playRoutes)
+			mux.Handle("/family/chess-utils.js", playRoutes)
+		}
+	}
 	if opt.contacts != nil {
 		var contactStore familyweb.ContactStore = opt.contacts
-		if opt.messages != nil || opt.guardianChat != nil {
-			contactStore = purgingContacts{Store: opt.contacts, messages: opt.messages, guardian: opt.guardianChat}
+		if opt.messages != nil || opt.guardianChat != nil || opt.games != nil {
+			contactStore = purgingContacts{Store: opt.contacts, messages: opt.messages, guardian: opt.guardianChat, games: opt.games}
 		}
 		var contactRoutes http.Handler
 		if opt.reports != nil {
@@ -683,6 +759,15 @@ func newApp(origin string, store *familystore.Store, directory *guardiandirector
 		}
 		if notifier != nil {
 			childOptions.Push = childweb.Push{Key: opt.pushKey, Subscriptions: opt.push}
+		}
+		if opt.games != nil {
+			childOptions.Games = opt.games
+		}
+		if opt.practice != nil {
+			childOptions.Practice = opt.practice
+		}
+		if opt.ratings != nil {
+			childOptions.Ratings = opt.ratings
 		}
 		if opt.reports != nil {
 			childOptions.Reports = opt.reports
@@ -743,6 +828,10 @@ func main() {
 	namesPath := flag.String("guardian-names", os.Getenv("YAPUNO_GUARDIAN_NAMES_FILE"), "optional private file for the names guardians choose to be shown by; requires the guardian chat")
 	sessionsPath := flag.String("guardian-sessions", os.Getenv("YAPUNO_GUARDIAN_SESSIONS_FILE"), "optional private file; lets guardians stay signed in on a device for 30 days, also across restarts")
 	signupPath := flag.String("signup", os.Getenv("YAPUNO_SIGNUP_FILE"), "optional private invitation file; switches invited self-registration on (guardianship is then self-declared)")
+	playPath := flag.String("play", os.Getenv("YAPUNO_PLAY_FILE"), "optional private file for the games guardians allow per child; requires the games log")
+	ratingsPath := flag.String("ratings", os.Getenv("YAPUNO_RATINGS_FILE"), "optional private file for each child's private chess rating; requires the games log")
+	practicePath := flag.String("practice", os.Getenv("YAPUNO_PRACTICE_FILE"), "optional private file for practice games against the computer; requires the games log")
+	gamesPath := flag.String("games", os.Getenv("YAPUNO_GAMES_FILE"), "optional private log of chess games between approved contacts; requires the play file, pairing and contacts")
 	appearancePath := flag.String("appearance", os.Getenv("YAPUNO_APPEARANCE_FILE"), "optional private file for saved looks (theme and figure)")
 	pushKeyPath := flag.String("push-key", os.Getenv("YAPUNO_PUSH_KEY_FILE"), "optional private VAPID key (0600, create with yapuno-pushkey); requires -push-subscriptions")
 	pushPath := flag.String("push-subscriptions", os.Getenv("YAPUNO_PUSH_SUBSCRIPTIONS_FILE"), "optional private file of children's push subscriptions; requires -push-key, pairing and a chat")
@@ -845,6 +934,41 @@ func main() {
 		}
 		log.Printf("invited self-registration is ON: guardianship is self-declared and not verified; use synthetic profiles only")
 	}
+	var playSettings *play.Settings
+	var gameStore *games.Store
+	if (*playPath == "") != (*gamesPath == "") {
+		log.Fatal("YAPUNO_PLAY_FILE and YAPUNO_GAMES_FILE are needed together")
+	}
+	if *gamesPath != "" {
+		if contactStore == nil || pairingStore == nil {
+			log.Fatal("YAPUNO_GAMES_FILE requires YAPUNO_CONTACTS_FILE and YAPUNO_PAIRING_FILE")
+		}
+		if playSettings, err = play.OpenSettings(*playPath, store); err != nil {
+			log.Fatal("play settings unavailable, insecure or corrupt")
+		}
+		if gameStore, err = games.Open(*gamesPath, contactStore, pairingStore, store, playSettings, time.Now); err != nil {
+			log.Fatal("game log unavailable, insecure or corrupt")
+		}
+		defer gameStore.Close()
+	}
+	var ratingStore *rating.Store
+	if *ratingsPath != "" {
+		if gameStore == nil {
+			log.Fatal("YAPUNO_RATINGS_FILE requires YAPUNO_PLAY_FILE and YAPUNO_GAMES_FILE")
+		}
+		if ratingStore, err = rating.Open(*ratingsPath, time.Now); err != nil {
+			log.Fatal("ratings file unavailable, insecure or corrupt")
+		}
+	}
+	var practiceStore *practice.Store
+	if *practicePath != "" {
+		if gameStore == nil {
+			log.Fatal("YAPUNO_PRACTICE_FILE requires YAPUNO_PLAY_FILE and YAPUNO_GAMES_FILE")
+		}
+		if practiceStore, err = practice.Open(*practicePath, pairingStore, store, playSettings, time.Now); err != nil {
+			log.Fatal("practice file unavailable, insecure or corrupt")
+		}
+	}
 	var pushKey *webpush.Key
 	var pushStore *webpush.Store
 	if *pushKeyPath != "" || *pushPath != "" {
@@ -876,7 +1000,7 @@ func main() {
 			log.Fatal("guardian session file unavailable, insecure or corrupt")
 		}
 	}
-	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore, guardianChat: guardianChatStore, guardianNames: guardianNameStore, pushKey: pushKey, push: pushStore})
+	application, err := newApp(*origin, store, directory, sender, sessions, optionalStores{pairing: pairingStore, appearance: appearanceStore, contacts: contactStore, messages: messageStore, guardianLocks: guardianLocks, reports: reportStore, signup: signupStore, guardianChat: guardianChatStore, guardianNames: guardianNameStore, play: playSettings, games: gameStore, practice: practiceStore, ratings: ratingStore, pushKey: pushKey, push: pushStore})
 	if err != nil {
 		log.Fatalf("invalid HTTPS origin or dependencies: %v", err)
 	}

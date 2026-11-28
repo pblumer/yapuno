@@ -27,4 +27,5 @@ Yapuno follows an Atlas-inspired ADR process. An ADR states **why** a choice is 
 - [A guardian may stay signed in on a device for thirty days](draft-guardian-remembered-sessions.md)
 - [Guardians delete a child profile or their whole family themselves](draft-self-service-deletion.md)
 - [Guardians choose a name for their children and a name for other parents](draft-guardian-names.md)
+- [Chess between approved contacts, played live or by correspondence](draft-yapuno-play-chess.md)
 - [Content-free Web Push notifications for children's devices](draft-web-push.md)
