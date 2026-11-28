@@ -83,6 +83,9 @@ type Options struct {
 	// Family lists the child's conversations with its own guardians. Their
 	// messages go through Messages like every other conversation.
 	Family FamilyChats
+	// Games enables chess with contacts. It requires Contacts, which names
+	// the other child.
+	Games Games
 }
 
 // FamilyThread is the conversation of the authenticated child with one of
@@ -122,6 +125,9 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 	if opt.ReportNotices && opt.Reports == nil {
 		return nil, errors.New("report notices require reporting")
 	}
+	if opt.Games != nil && opt.Contacts == nil {
+		return nil, errors.New("games require the contact store")
+	}
 	h := &handler{sessions: sessions, children: children, opt: opt}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /child", h.home)
@@ -141,6 +147,9 @@ func New(sessions Sessions, children Children, opt Options) (http.Handler, error
 		mux.HandleFunc("POST /child/chat/{id}/send", h.sendForm)
 		mux.HandleFunc("GET /child/chat/{id}/messages", h.historyJSON)
 		mux.HandleFunc("POST /child/chat/{id}/messages", h.sendJSON)
+	}
+	if opt.Games != nil {
+		h.mountPlay(mux)
 	}
 	// Blocking and reporting exist for contacts between children only.
 	if opt.Messages != nil && opt.Contacts != nil {
@@ -302,6 +311,8 @@ const homeCSS = `body{margin:0}
 .yp-crew li:has(a){padding:0}
 .yp-crew a{flex:1;display:flex;align-items:center;gap:.8rem;min-height:64px;padding:.7rem .9rem;border-radius:var(--yp-radius);color:var(--yp-text);text-decoration:none}
 .yp-crew a:focus-visible{outline:3px solid var(--yp-focus);outline-offset:2px}
+.yp-crew a.yp-play-link{flex:none;flex-direction:column;justify-content:center;gap:0;min-width:64px;padding:.4rem .6rem;border-left:2px solid var(--yp-line);border-radius:0 var(--yp-radius) var(--yp-radius) 0;font-size:1.6rem;line-height:1}
+.yp-crew a.yp-play-link small{font-size:.7rem;font-weight:800;color:var(--yp-accent-text);text-align:center}
 .yp-go{margin-left:auto;color:var(--yp-accent-text);font-size:1.4rem}
 .yp-crew svg{flex:none}
 .yp-me{display:grid;place-items:center;min-width:52px;min-height:52px;border-radius:50%;color:var(--yp-text)}
@@ -325,7 +336,7 @@ var homePage = template.Must(template.New("child-home").Parse(`<!doctype html><h
 {{if .Notice}}<p class="yp-status" role="status">{{.Notice}}</p>{{end}}<p class="yp-muted">Schön, dass du da bist.</p>
 {{if .Parents}}<h2>Deine Eltern</h2><ul class="yp-crew">{{range .Parents}}<li><a href="/child/chat/{{.Chat}}">{{template "face" .}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a></li>{{end}}</ul><p class="yp-muted">Was ihr hier schreibt, sehen nur du und dieser Elternteil.</p>{{end}}
 <h2>Deine Crew</h2>
-{{if .Crew}}<ul class="yp-crew">{{range .Crew}}<li>{{if .Chat}}<a href="/child/chat/{{.Chat}}">{{template "face" .}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a>{{else}}{{template "face" .}}<span>{{.Name}}</span>{{end}}</li>{{end}}</ul>{{else}}<p class="yp-empty">Noch niemand in deiner Crew. Deine Eltern können dich mit anderen Kindern verbinden.</p>{{end}}
+{{if .Crew}}<ul class="yp-crew">{{range .Crew}}<li>{{if .Chat}}<a href="/child/chat/{{.Chat}}">{{template "face" .}}<span>{{.Name}}</span><span class="yp-go" aria-hidden="true">›</span></a>{{else}}{{template "face" .}}<span>{{.Name}}</span>{{end}}{{if .Play}}<a class="yp-play-link" href="/child/play/{{.Play}}" aria-label="Schach mit {{.Name}}{{if .PlayNote}}: {{.PlayNote}}{{end}}"><span aria-hidden="true">♞&#xFE0E;</span>{{if .PlayNote}}<small aria-hidden="true">{{.PlayNote}}</small>{{end}}</a>{{end}}</li>{{end}}</ul>{{else}}<p class="yp-empty">Noch niemand in deiner Crew. Deine Eltern können dich mit anderen Kindern verbinden.</p>{{end}}
 <p class="yp-muted">In deiner Crew sind nur Kinder, denen beide Familien zugestimmt haben. Fremde können dich nicht finden.</p>
 {{if .Blocked}}<h2>Blockiert</h2><ul class="yp-crew">{{range .Blocked}}<li><span class="yp-initial" aria-hidden="true">{{.Initial}}</span><span>{{.Name}}</span></li>{{end}}</ul><p class="yp-muted">Ihr könnt euch nicht schreiben. Nur deine Eltern können eine Blockierung aufheben.</p>{{end}}
 <p class="yp-note">{{if .Chats}}Tippe auf einen Namen, um zu schreiben. Das hier ist eine Vorschau.{{else}}Nachrichten schreiben kommt bald. Das hier ist eine Vorschau.{{end}}</p>
@@ -334,10 +345,12 @@ var homePage = template.Must(template.New("child-home").Parse(`<!doctype html><h
 </div></main></body></html>{{define "face"}}{{if .Figure}}{{.Figure}}{{else}}<span class="yp-initial" aria-hidden="true">{{.Initial}}</span>{{end}}{{end}}`))
 
 type crewMember struct {
-	Name    string
-	Initial string
-	Chat    string        // conversation id when messaging is enabled
-	Figure  template.HTML // the contact's figure, when looks are enabled
+	Name     string
+	Initial  string
+	Chat     string        // conversation id when messaging is enabled
+	Play     string        // contact id when the two may play chess
+	PlayNote string        // "Einladung", "Du bist am Zug" or empty
+	Figure   template.HTML // the contact's figure, when looks are enabled
 }
 
 func (h *handler) home(w http.ResponseWriter, r *http.Request) {
@@ -377,6 +390,9 @@ func (h *handler) home(w http.ResponseWriter, r *http.Request) {
 			member := crewMember{Name: c.Name, Initial: initial, Figure: h.peerFigure(self, c.ID)}
 			if h.opt.Messages != nil {
 				member.Chat = c.ID
+			}
+			if note, ok := h.playNote(s, c.ID); ok {
+				member.Play, member.PlayNote = c.ID, note
 			}
 			crew = append(crew, member)
 		}
